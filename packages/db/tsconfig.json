@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../profile" },
+    { "path": "../domain" },
+    { "path": "../security" },
+    { "path": "../tracking" },
+    { "path": "../discovery" },
+    { "path": "../document-safety" },
+    { "path": "../policy" },
+    { "path": "../application" },
+    { "path": "../browser-core" },
+    { "path": "../adapters" }
+  ],
+  "include": ["src/**/*.ts"]
+}

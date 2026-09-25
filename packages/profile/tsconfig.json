@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../document-safety" },
+    { "path": "../domain" },
+    { "path": "../knowledge-base" },
+    { "path": "../security" }
+  ],
+  "include": ["src/**/*.ts"]
+}

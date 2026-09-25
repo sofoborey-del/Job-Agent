@@ -1,0 +1,16 @@
+{
+  "name": "@job-agent/browser-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "types": "./dist/index.d.ts",
+    "default": "./dist/index.js"
+  },
+  "dependencies": {
+    "@job-agent/domain": "workspace:*",
+    "@job-agent/knowledge-base": "workspace:*",
+    "@job-agent/observability": "workspace:*",
+    "zod": "^4.1.11"
+  }
+}

@@ -1,0 +1,272 @@
+{
+  "description": "A representative set of adverts for reviewing shortlist quality before Phase 2. Every entry is synthetic. Review the recommended actions and tell the maintainer where you disagree.",
+  "profileFacts": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "key": "preferences.target_roles",
+      "value": ["information governance officer", "compliance officer", "cyber security policy"]
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "key": "preferences.location",
+      "value": ["Glasgow", "Hybrid", "Remote"]
+    },
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "key": "preferences.contract_type",
+      "value": ["permanent"]
+    },
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "key": "preferences.exclusions",
+      "value": ["night shift"]
+    },
+    {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "key": "skills.governance",
+      "value": "information governance, data protection, compliance, corporate risk, fraud investigation, policy writing"
+    },
+    {
+      "id": "66666666-6666-4666-8666-666666666666",
+      "key": "employment.history",
+      "value": "Six years across FCA regulated firms covering fraud investigation, compliance monitoring, corporate risk and protection advice."
+    },
+    {
+      "id": "77777777-7777-4777-8777-777777777777",
+      "key": "certifications_licences.security_plus",
+      "value": "CompTIA Security Plus certification and the Generation UK IT Support with Cyber Security programme"
+    },
+    {
+      "id": "88888888-8888-4888-8888-888888888888",
+      "key": "work_authorisation.gb",
+      "value": {
+        "authorised": true
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "strong match, clear salary",
+      "note": "Close to the target role, salary clearly above the floor.",
+      "job": {
+        "id": "case-1",
+        "title": "Information Governance Officer",
+        "employer": "Example Council",
+        "location": "Glasgow",
+        "description": "You must have information governance and data protection experience. A compliance or corporate risk background is essential. Policy writing experience is required.",
+        "salary": {
+          "minimumMinor": 3400000,
+          "maximumMinor": 3800000,
+          "currency": "GBP",
+          "basis": "annual_base",
+          "confidence": 0.99,
+          "sourceText": "\u00a334,000 - \u00a338,000"
+        },
+        "contractType": "Permanent",
+        "employmentTypes": ["FULL_TIME"],
+        "workPattern": "Hybrid",
+        "closesAt": "2027-01-31T23:59:59.000Z"
+      }
+    },
+    {
+      "name": "strong match blocked only by a licence",
+      "note": "Identical to the strong match except for one unevidenced licence, so the licence is the only variable.",
+      "job": {
+        "id": "case-10",
+        "title": "Information Governance Officer",
+        "employer": "Example Council",
+        "location": "Glasgow",
+        "description": "You must have information governance and data protection experience. A compliance or corporate risk background is essential. Policy writing experience is required. You must hold a full UK driving licence.",
+        "salary": {
+          "minimumMinor": 3400000,
+          "maximumMinor": 3800000,
+          "currency": "GBP",
+          "basis": "annual_base",
+          "confidence": 0.99,
+          "sourceText": "\u00a334,000 - \u00a338,000"
+        },
+        "contractType": "Permanent",
+        "employmentTypes": ["FULL_TIME"],
+        "workPattern": "Hybrid",
+        "closesAt": "2027-01-31T23:59:59.000Z"
+      }
+    },
+    {
+      "name": "poor match, unrelated trade role",
+      "note": "Nothing in the profile supports this advert.",
+      "job": {
+        "id": "case-2",
+        "title": "Groundworker",
+        "employer": "Example Council",
+        "location": "Glasgow",
+        "description": "You must hold a CSCS card. Experience of kerb laying is essential. A valid HGV licence is required.",
+        "salary": {
+          "minimumMinor": 2800000,
+          "maximumMinor": 3000000,
+          "currency": "GBP",
+          "basis": "annual_base",
+          "confidence": 0.99,
+          "sourceText": "\u00a328,000 - \u00a330,000"
+        },
+        "contractType": "Permanent",
+        "employmentTypes": ["FULL_TIME"],
+        "workPattern": null,
+        "closesAt": "2027-01-31T23:59:59.000Z"
+      }
+    },
+    {
+      "name": "salary clearly below the floor",
+      "note": "The maximum is under GBP 25,000, so this must be a hard reject.",
+      "job": {
+        "id": "case-3",
+        "title": "Compliance Assistant",
+        "employer": "Example Trust",
+        "location": "Glasgow",
+        "description": "Compliance experience is essential. Data protection knowledge is required.",
+        "salary": {
+          "minimumMinor": 2100000,
+          "maximumMinor": 2300000,
+          "currency": "GBP",
+          "basis": "annual_base",
+          "confidence": 0.99,
+          "sourceText": "\u00a321,000 - \u00a323,000"
+        },
+        "contractType": "Permanent",
+        "employmentTypes": ["FULL_TIME"],
+        "workPattern": null,
+        "closesAt": "2027-01-31T23:59:59.000Z"
+      }
+    },
+    {
+      "name": "ambiguous salary, negotiable",
+      "note": "No stated figures, so salary must be unknown and nothing automatic may follow.",
+      "job": {
+        "id": "case-4",
+        "title": "Compliance Officer",
+        "employer": "Example Board",
+        "location": "Glasgow",
+        "description": "Compliance monitoring experience is essential. Corporate risk experience is required.",
+        "salary": null,
+        "contractType": "Permanent",
+        "employmentTypes": ["FULL_TIME"],
+        "workPattern": "Hybrid",
+        "closesAt": "2027-01-31T23:59:59.000Z"
+      }
+    },
+    {
+      "name": "salary range straddling the floor",
+      "note": "The bottom of the range is under the floor, so the gate must stay unknown.",
+      "job": {
+        "id": "case-5",
+        "title": "Information Governance Assistant",
+        "employer": "Example Council",
+        "location": "Glasgow",
+        "description": "Information governance experience is essential. Data protection knowledge is required.",
+        "salary": {
+          "minimumMinor": 2400000,
+          "maximumMinor": 2900000,
+          "currency": "GBP",
+          "basis": "annual_base",
+          "confidence": 0.99,
+          "sourceText": "\u00a324,000 - \u00a329,000"
+        },
+        "contractType": "Permanent",
+        "employmentTypes": ["FULL_TIME"],
+        "workPattern": null,
+        "closesAt": "2027-01-31T23:59:59.000Z"
+      }
+    },
+    {
+      "name": "hourly pay only",
+      "note": "Hourly pay is not annualised without stated hours, so the gate must stay unknown.",
+      "job": {
+        "id": "case-6",
+        "title": "Records Officer",
+        "employer": "Example Council",
+        "location": "Glasgow",
+        "description": "Records management experience is essential. Data protection knowledge is required.",
+        "salary": {
+          "minimumMinor": 1800,
+          "maximumMinor": 2100,
+          "currency": "GBP",
+          "basis": "hourly",
+          "confidence": 0.8,
+          "sourceText": "\u00a318.00 - \u00a321.00 per hour"
+        },
+        "contractType": "Temporary",
+        "employmentTypes": ["PART_TIME"],
+        "workPattern": null,
+        "closesAt": "2027-01-31T23:59:59.000Z"
+      }
+    },
+    {
+      "name": "missing mandatory prerequisite",
+      "note": "A licence the profile has no evidence for must stay unknown and block anything automatic.",
+      "job": {
+        "id": "case-7",
+        "title": "Information Governance Officer",
+        "employer": "Example Health Board",
+        "location": "Glasgow",
+        "description": "Information governance experience is essential. You must hold a current PVG scheme membership. A full UK driving licence is required.",
+        "salary": {
+          "minimumMinor": 3400000,
+          "maximumMinor": 3800000,
+          "currency": "GBP",
+          "basis": "annual_base",
+          "confidence": 0.99,
+          "sourceText": "\u00a334,000 - \u00a338,000"
+        },
+        "contractType": "Permanent",
+        "employmentTypes": ["FULL_TIME"],
+        "workPattern": null,
+        "closesAt": "2027-01-31T23:59:59.000Z"
+      }
+    },
+    {
+      "name": "closed vacancy",
+      "note": "The closing date has passed, so this must be a hard reject.",
+      "job": {
+        "id": "case-8",
+        "title": "Information Governance Officer",
+        "employer": "Example Council",
+        "location": "Glasgow",
+        "description": "Information governance experience is essential. Data protection knowledge is required.",
+        "salary": {
+          "minimumMinor": 3400000,
+          "maximumMinor": 3800000,
+          "currency": "GBP",
+          "basis": "annual_base",
+          "confidence": 0.99,
+          "sourceText": "\u00a334,000 - \u00a338,000"
+        },
+        "contractType": "Permanent",
+        "employmentTypes": ["FULL_TIME"],
+        "workPattern": null,
+        "closesAt": "2026-01-31T23:59:59.000Z"
+      }
+    },
+    {
+      "name": "excluded by the user's own rule",
+      "note": "The advert matches an exclusion the user set, so it must be a hard reject.",
+      "job": {
+        "id": "case-9",
+        "title": "Security Officer",
+        "employer": "Example Council",
+        "location": "Glasgow",
+        "description": "This is a night shift post. Security experience is essential. An SIA licence is required.",
+        "salary": {
+          "minimumMinor": 2600000,
+          "maximumMinor": 2800000,
+          "currency": "GBP",
+          "basis": "annual_base",
+          "confidence": 0.99,
+          "sourceText": "\u00a326,000 - \u00a328,000"
+        },
+        "contractType": "Permanent",
+        "employmentTypes": ["FULL_TIME"],
+        "workPattern": null,
+        "closesAt": "2027-01-31T23:59:59.000Z"
+      }
+    }
+  ]
+}

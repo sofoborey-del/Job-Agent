@@ -1,0 +1,28 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../../packages/config" },
+    { "path": "../../packages/adapters" },
+    { "path": "../../packages/application" },
+    { "path": "../../packages/browser-core" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/discovery" },
+    { "path": "../../packages/document-safety" },
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/knowledge-base" },
+    { "path": "../../packages/matching" },
+    { "path": "../../packages/notifications" },
+    { "path": "../../packages/observability" },
+    { "path": "../../packages/orchestrator" },
+    { "path": "../../packages/policy" },
+    { "path": "../../packages/profile" },
+    { "path": "../../packages/security" },
+    { "path": "../../packages/tracking" }
+  ],
+  "include": ["src/**/*.ts"]
+}

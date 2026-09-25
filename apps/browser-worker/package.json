@@ -1,0 +1,24 @@
+{
+  "name": "@job-agent/browser-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "types": "./dist/index.d.ts",
+    "default": "./dist/index.js"
+  },
+  "dependencies": {
+    "@job-agent/adapters": "workspace:*",
+    "@job-agent/application": "workspace:*",
+    "@job-agent/browser-core": "workspace:*",
+    "@job-agent/db": "workspace:*",
+    "@job-agent/domain": "workspace:*",
+    "@job-agent/fake-ats": "workspace:*",
+    "@job-agent/observability": "workspace:*",
+    "@job-agent/orchestrator": "workspace:*",
+    "@job-agent/security": "workspace:*",
+    "playwright": "1.56.0",
+    "uuid": "^13.0.0",
+    "zod": "^4.1.11"
+  }
+}

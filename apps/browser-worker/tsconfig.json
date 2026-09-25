@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../../packages/adapters" },
+    { "path": "../fake-ats" },
+    { "path": "../../packages/application" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/orchestrator" },
+    { "path": "../../packages/security" },
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/browser-core" },
+    { "path": "../../packages/observability" }
+  ],
+  "include": ["src/**/*.ts"]
+}

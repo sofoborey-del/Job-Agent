@@ -1,0 +1,26 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/domain" },
+    { "path": "./packages/config" },
+    { "path": "./packages/document-safety" },
+    { "path": "./packages/security" },
+    { "path": "./packages/observability" },
+    { "path": "./packages/policy" },
+    { "path": "./packages/knowledge-base" },
+    { "path": "./packages/profile" },
+    { "path": "./packages/discovery" },
+    { "path": "./packages/matching" },
+    { "path": "./packages/browser-core" },
+    { "path": "./packages/adapters" },
+    { "path": "./packages/tracking" },
+    { "path": "./packages/notifications" },
+    { "path": "./packages/orchestrator" },
+    { "path": "./packages/application" },
+    { "path": "./packages/db" },
+    { "path": "./apps/fake-ats" },
+    { "path": "./apps/browser-worker" },
+    { "path": "./apps/api" },
+    { "path": "./apps/demo" }
+  ]
+}

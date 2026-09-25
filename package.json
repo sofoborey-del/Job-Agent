@@ -1,0 +1,46 @@
+{
+  "name": "job-application-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone, policy-driven job discovery and application orchestration agent.",
+  "type": "module",
+  "engines": {
+    "node": ">=22 <26"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "api": "pnpm build && node --env-file=.env apps/api/dist/index.js",
+    "db:migrate": "pnpm build && node --env-file=.env apps/api/dist/migrate.js",
+    "demo": "pnpm build && node apps/demo/dist/index.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "secrets:generate": "node scripts/generate-local-secrets.mjs",
+    "setup:local": "node scripts/initialize-local-env.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --pretty false",
+    "shadow:corpus": "pnpm build && node scripts/shadow-corpus-report.mjs",
+    "fake-ats": "pnpm build && node apps/fake-ats/dist/main.js",
+    "browser:install": "pnpm --filter @job-agent/browser-worker exec playwright install chromium",
+    "walkthrough:phase2": "pnpm build && node scripts/phase-2-walkthrough.mjs",
+    "licence:options": "pnpm build && node scripts/licence-threshold-options.mjs",
+    "review:real-adverts": "pnpm build && node scripts/real-advert-review.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "@electric-sql/pglite": "^0.3.14",
+    "@types/node": "^24.5.2",
+    "@types/pg": "^8.15.5",
+    "eslint": "^9.36.0",
+    "fastify": "^5.6.1",
+    "pg": "^8.16.3",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.44.1",
+    "vitest": "^3.2.4",
+    "uuid": "^13.0.0",
+    "zod": "^4.1.11"
+  }
+}

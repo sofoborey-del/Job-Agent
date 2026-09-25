@@ -1,0 +1,29 @@
+{
+  "name": "@job-agent/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@job-agent/adapters": "workspace:*",
+    "@job-agent/application": "workspace:*",
+    "@job-agent/browser-core": "workspace:*",
+    "@job-agent/config": "workspace:*",
+    "@job-agent/db": "workspace:*",
+    "@job-agent/discovery": "workspace:*",
+    "@job-agent/document-safety": "workspace:*",
+    "@job-agent/domain": "workspace:*",
+    "@job-agent/knowledge-base": "workspace:*",
+    "@job-agent/matching": "workspace:*",
+    "@job-agent/notifications": "workspace:*",
+    "@job-agent/observability": "workspace:*",
+    "@job-agent/orchestrator": "workspace:*",
+    "@job-agent/policy": "workspace:*",
+    "@job-agent/profile": "workspace:*",
+    "@job-agent/security": "workspace:*",
+    "@job-agent/tracking": "workspace:*",
+    "fastify": "^5.6.1",
+    "pg": "^8.16.3",
+    "zod": "^4.1.11"
+  }
+}

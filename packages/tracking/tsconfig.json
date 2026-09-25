@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../config" },
+    { "path": "../discovery" },
+    { "path": "../document-safety" },
+    { "path": "../domain" },
+    { "path": "../knowledge-base" },
+    { "path": "../matching" },
+    { "path": "../observability" },
+    { "path": "../policy" }
+  ],
+  "include": ["src/**/*.ts"]
+}
