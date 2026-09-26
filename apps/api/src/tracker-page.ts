@@ -345,6 +345,66 @@ export const trackerPageHtml = String.raw`<!doctype html>
       actions.append(link);
       card.append(actions);
 
+      var prepare = document.createElement('button');
+      prepare.type = 'button';
+      prepare.textContent = 'Prepare application';
+      var preparation = document.createElement('div');
+      preparation.className = 'note';
+      preparation.hidden = true;
+      prepare.addEventListener('click', function () {
+        prepare.disabled = true;
+        preparation.hidden = false;
+        preparation.textContent = 'Checking this job…';
+        request('/v1/tracker/:userId/jobs/' + job.jobId, {}).then(function (detail) {
+          preparation.replaceChildren();
+          var heading = document.createElement('h4');
+          heading.textContent = 'Application preparation: ' + detail.title;
+          var guidance = document.createElement('p');
+          var expired = detail.closesAt && new Date(detail.closesAt).getTime() <= Date.now();
+          var unavailable = detail.lifecycleStatus !== 'open' || expired;
+          guidance.textContent = unavailable
+            ? 'This vacancy is closed, expired or changed. Check the original advert before proceeding.'
+            : 'Review the requirements below, then open the advert and choose Apply. You will log in and complete the form yourself. Browser prefill is not available for this employer yet.';
+          preparation.append(heading, guidance);
+          var run = detail.matchRun;
+          var requirements = document.createElement('ul');
+          if (run) {
+            (run.explanation.requirements || []).forEach(function (requirement) {
+              var item = document.createElement('li');
+              item.textContent = (requirement.outcome === 'met' ? 'Supported by your approved profile: ' : 'Check before applying: ') + requirement.text;
+              requirements.append(item);
+            });
+            (run.explanation.hardRejectReasons || []).forEach(function (reason) {
+              var item = document.createElement('li');
+              item.textContent = 'Eligibility concern: ' + reason.replace(/_/g, ' ');
+              requirements.append(item);
+            });
+          }
+          if (!requirements.children.length) {
+            var item = document.createElement('li');
+            item.textContent = 'No essential criteria have been confirmed here. Read the full person specification before applying.';
+            requirements.append(item);
+          }
+          preparation.append(requirements);
+          var applicationLink = document.createElement('a');
+          var destination;
+          try { destination = new URL(detail.canonicalUrl); } catch (_) { destination = null; }
+          if (destination && destination.protocol === 'https:') {
+            applicationLink.href = destination.href;
+            applicationLink.target = '_blank';
+            applicationLink.rel = 'noopener noreferrer';
+            applicationLink.textContent = 'Open application site';
+            preparation.append(applicationLink);
+          }
+          var reminder = document.createElement('p');
+          reminder.textContent = 'Check your existing applications on the employer site to avoid applying twice. This preparation does not send an application or record it as submitted.';
+          preparation.append(reminder);
+        }).catch(function (error) { preparation.textContent = error.message; })
+          .finally(function () { prepare.disabled = false; });
+      });
+      actions.prepend(prepare);
+      card.append(preparation);
+
       var details = document.createElement('details');
       var summary = document.createElement('summary');
       summary.textContent = 'Why this decision';
