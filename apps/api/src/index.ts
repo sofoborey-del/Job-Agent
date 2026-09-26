@@ -15,7 +15,7 @@ import { ApplicationWorkflowService } from '@job-agent/application';
 import { defaultSourceDefinitions } from '@job-agent/discovery';
 import { DiscordClient, DiscordCommandService } from '@job-agent/notifications';
 import { RedactingLogger } from '@job-agent/observability';
-import { DiscoveryScheduler, OutboxPublisher } from '@job-agent/orchestrator';
+import { ApplicationRunner, DiscoveryScheduler, OutboxPublisher } from '@job-agent/orchestrator';
 import {
   DiscoveryService,
   JobMatchService,
@@ -35,6 +35,7 @@ import { FieldCipher, StaticEncryptionKeyProvider } from '@job-agent/security';
 
 import { createApplicationCommandPort, type ApplicationRuntime } from './application-routes.js';
 import { buildServer } from './server.js';
+import { SpawnWorkerTransport } from './worker-transport.js';
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name];
@@ -182,19 +183,33 @@ if (!['127.0.0.1', 'localhost', '::1'].includes(fakeAtsHostname)) {
 }
 const applicationStores = createApplicationStores(sqlDatabase);
 const applicationAdapter = fakeAtsAdapter(fakeAtsOrigin);
+const applicationWorkflow = new ApplicationWorkflowService({
+  stores: applicationStores,
+  cipher,
+  adapter: applicationAdapter,
+  logger,
+  timezone: process.env.APP_TIMEZONE ?? 'Europe/London',
+});
 const applications: ApplicationRuntime = {
   stores: applicationStores,
   tracking: stores,
-  workflow: new ApplicationWorkflowService({
-    stores: applicationStores,
-    cipher,
-    adapter: applicationAdapter,
-    logger,
-    timezone: process.env.APP_TIMEZONE ?? 'Europe/London',
-  }),
+  workflow: applicationWorkflow,
   adapter: applicationAdapter,
   cipher,
   fakeAtsOrigin,
+  // Drives the bundled fake ATS and nothing else: the origin was already rejected above unless it
+  // is loopback, and the worker runs in its own process with the secrets withheld.
+  drive: {
+    runner: new ApplicationRunner({
+      workflow: applicationWorkflow,
+      transport: new SpawnWorkerTransport({ logger }),
+      adapter: applicationAdapter,
+      logger,
+    }),
+    loadFacts: async (userId) => await profileService.listFacts(userId),
+    loadApprovedDocument: async (userId) => await cvProcessingService.approvedUpload(userId),
+    policyVersion: 'fake-ats-local-v1',
+  },
 };
 
 const app = buildServer({

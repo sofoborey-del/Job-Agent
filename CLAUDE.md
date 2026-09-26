@@ -53,10 +53,12 @@ The architecture specification is authoritative. If implementation and specifica
 - Discord `/application` commands for questions, answers, approval, rejection, takeover and resume.
 - Local nontechnical screens at `/onboarding`, `/cv-review`, `/shadow-match`, `/tracker`, and
   `/applications`.
+- Local routes that start and advance a practice application on the fake ATS, with the browser
+  worker spawned per request in its own process and the control-plane secrets withheld from it.
 - Browser automation is confined to the bundled fake ATS. No candidate-account access, no real
   employer form, and no submission capability outside that fake target.
 
-`pnpm check` passes 315 tests (the Playwright tests skip themselves on a machine where
+`pnpm check` passes 334 tests (the Playwright tests skip themselves on a machine where
 `pnpm browser:install` has not been run). Re-run it before and after material changes. On this Windows machine, if pnpm stalls while linking dependencies, use `pnpm install --package-import-method=copy`.
 
 `pnpm` itself was absent from this machine on 2026-09-25 and was installed globally with
@@ -176,9 +178,10 @@ that drives the browser — was never wired into `apps/api`. It is referenced on
 `apps/browser-worker/src/journey.test.ts` and `scripts/phase-2-walkthrough.mjs`. There is no HTTP
 route that creates an application, and the tracker page had no control to start one, although the
 applications page told the user that was where to do it. `scripts/phase-2-screen-walkthrough.mjs`
-now supplies that drive against a throwaway database; the misleading page text is corrected. No
-production route was added, deliberately: wiring the runner into the service touches the attempt and
-submit path and deserves its own review.
+supplied that drive against a throwaway database; the misleading page text was corrected.
+
+**Resolved on 2026-09-26.** The runner is now wired into `apps/api`. See "Driving a practice
+application from the screens" below.
 
 **2. A run that paused on a human-only step could never be resumed through the screens.** Sensitive
 and human-only fields open questions with `responseKind: 'human_action'`. The answer route refuses
@@ -202,6 +205,43 @@ Seven tests cover it, at the workflow layer and at the route layer. The route la
 mattered: `pnpm walkthrough:phase2` passes either way because it writes directly to the store and
 never exercises the route guard that was missing. When a flow is only proven through a script that
 bypasses the API, the API is not proven.
+
+### Driving a practice application from the screens (added 2026-09-26)
+
+The gap recorded above is closed. `ApplicationRunner` is wired into `apps/api`, so the applications
+page can start a practice run and carry one on. Two routes, both confined to the bundled fake ATS:
+
+- `POST /v1/applications/:userId/start` with `{ jobId }` — the job must already be on that user's
+  tracker, or the route answers `unknown_job`. It is idempotent by job, because `startAttempt`
+  already is: a second start returns the running attempt rather than creating a second application.
+- `POST /v1/applications/:userId/:applicationId/advance` — re-reads the form and fills whatever can
+  now be evidenced, for use after questions have been answered.
+
+Both refuse with `questions_open` while anything is waiting for the user, so a run can never
+proceed by guessing past a question it already asked. Both answer `driving_unavailable` when the
+build has no `drive` wired, rather than half-working.
+
+**The submit path was deliberately not touched.** These routes start and advance only. The runner
+is handed `submitPermitted: false`, there is still no route that submits, and the submit guard and
+approval flow are unchanged. Wiring submit is a separate change and needs its own review.
+
+**Process isolation.** `SpawnWorkerTransport` in `apps/api/src/worker-transport.ts` runs each
+worker request in a fresh `apps/browser-worker/dist/main.js` process over stdin/stdout, with a hard
+timeout, bounded output, and an explicit environment allowlist: the process that drives a browser
+never receives `APP_ENCRYPTION_KEY_BASE64`, `PROFILE_ADMIN_TOKEN`, `DATABASE_URL` or any
+`DISCORD_*` value. Worker stderr is discarded rather than logged, and unparseable stdout becomes
+`worker_bad_output` rather than being echoed, because the request that produced it carries
+applicant answers. `worker-transport.test.ts` pins all of this.
+
+**Schema note.** `application_attempts.session_ref` existed in `0004` but was never read or
+written. It now holds the fake-ATS session for the attempt, so an advance resumes the same session
+instead of opening a new one. No migration was needed.
+
+The approved CV reaches the worker through `CvProcessingService.approvedUpload`, which returns
+nothing unless the document is approved and re-verifies the SHA-256 before handing the bytes over.
+Those bytes go to the worker and nowhere else: they are never logged and never in an API response.
+
+`pnpm check` passes 334 tests across 36 files after this change, up from 318 across 35.
 
 **Prompt-injection regression coverage.** MVP acceptance criterion 14 is covered by
 `tests/fixtures/prompt-injection-corpus.json` and

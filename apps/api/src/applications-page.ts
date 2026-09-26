@@ -61,7 +61,14 @@ export const applicationsPageHtml = String.raw`<!doctype html>
         <input id="profile" type="text" autocomplete="off">
       </div>
     </div>
-    <div class="actions"><button id="load" type="button">Show my practice applications</button></div>
+    <div>
+        <label for="jobid">Job ID from your tracker (only needed to start a new practice run)</label>
+        <input id="jobid" type="text" autocomplete="off">
+      </div>
+    <div class="actions">
+      <button id="load" type="button">Show my practice applications</button>
+      <button id="start" type="button" class="ghost">Start a practice run on this job</button>
+    </div>
     <p id="status" class="note" role="status" aria-live="polite">Enter your token and profile ID, then choose "Show my practice applications".</p>
   </section>
 
@@ -151,7 +158,7 @@ export const applicationsPageHtml = String.raw`<!doctype html>
       if (!body.applications.length) {
         var empty = document.createElement('div');
         empty.className = 'muted';
-        empty.textContent = 'None yet. A practice run is started with scripts/phase-2-screen-walkthrough.mjs; see docs/runbooks/phase-2-fake-ats.md.';
+        empty.textContent = 'None yet. Put a job ID from your tracker in the box above and choose "Start a practice run on this job". The practice job site must be running (pnpm fake-ats).';
         container.append(empty);
         say('No practice applications yet.');
         return;
@@ -410,8 +417,18 @@ export const applicationsPageHtml = String.raw`<!doctype html>
         .then(function (body) { say(body.message); loadDetail(detail.application.applicationId); })
         .catch(function (error) { say(error.message, true); resume.disabled = false; });
     });
-    actions.append(takeover, resume);
+    var carryOn = document.createElement('button');
+    carryOn.type = 'button';
+    carryOn.textContent = 'Carry on filling';
+    carryOn.addEventListener('click', function () {
+      advanceRun(detail.application.applicationId, carryOn);
+    });
+    actions.append(carryOn, takeover, resume);
     container.append(actions);
+    var note = document.createElement('div');
+    note.className = 'muted';
+    note.textContent = '"Carry on filling" re-reads the practice form and fills whatever it can now evidence. It stops again at the first question, and it never submits.';
+    container.append(note);
   }
 
   function loadDetail(applicationId) {
@@ -448,7 +465,44 @@ export const applicationsPageHtml = String.raw`<!doctype html>
     }).catch(function (error) { say(error.message, true); });
   }
 
+  function describeRun(body) {
+    if (body.refusal) return 'The agent stopped: ' + body.refusal.message;
+    if (body.pauseReason === 'unknown_field') return 'It stopped because it cannot evidence an answer. Open the run and answer the question.';
+    if (body.pauseReason === 'human_only_step') return 'It stopped at a step only you may do. Open the run, take over, and confirm when done.';
+    if (body.reachedReview) return 'It filled everything it could and the review is ready.';
+    if (body.pauseReason) return 'It stopped: ' + String(body.pauseReason).replace(/_/g, ' ') + '.';
+    return 'The run has stopped.';
+  }
+
+  function startRun() {
+    var jobId = el('jobid').value.trim();
+    if (!jobId) { say('Put a job ID from your tracker in the box first.', true); return; }
+    var button = el('start');
+    button.disabled = true;
+    say('Starting on the practice job site. Nothing is sent to an employer.');
+    request('/v1/applications/:userId/start', {
+      method: 'POST',
+      body: JSON.stringify({ jobId: jobId })
+    }).then(function (body) {
+      say(describeRun(body));
+      loadList();
+    }).catch(function (error) { say(error.message, true); })
+      .then(function () { button.disabled = false; });
+  }
+
+  function advanceRun(applicationId, button) {
+    button.disabled = true;
+    say('Carrying on from where it stopped.');
+    request('/v1/applications/:userId/' + encodeURIComponent(applicationId) + '/advance', {
+      method: 'POST'
+    }).then(function (body) {
+      say(describeRun(body));
+      loadDetail(applicationId);
+    }).catch(function (error) { say(error.message, true); button.disabled = false; });
+  }
+
   el('load').addEventListener('click', loadList);
+  el('start').addEventListener('click', startRun);
 </script>
 </body>
 </html>`;

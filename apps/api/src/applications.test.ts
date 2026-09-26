@@ -25,6 +25,9 @@ import { FieldCipher, StaticEncryptionKeyProvider } from '@job-agent/security';
 import type { TrackingStores } from '@job-agent/tracking';
 import { v7 as uuidv7 } from 'uuid';
 
+import type { ApplicationRunner, RunOutcome } from '@job-agent/orchestrator';
+
+import type { ApprovedDocument } from './application-routes.js';
 import { buildServer } from './server.js';
 
 const adminToken = 'test-token-that-is-at-least-thirty-two-characters';
@@ -532,5 +535,255 @@ describe('the application API', () => {
       headers: auth,
     });
     expect(response.json<{ applications: unknown[] }>().applications).toHaveLength(1);
+  });
+});
+
+describe('starting and advancing a practice application', () => {
+  type Captured = Parameters<ApplicationRunner['runUntilPause']>[0];
+
+  let captured: Captured[];
+
+  /** A runner that records what it was asked to do. No browser is started in these tests. */
+  function stubRunner(): ApplicationRunner {
+    return {
+      runUntilPause: (input: Captured) => {
+        captured.push(input);
+        const outcome: RunOutcome = {
+          finishedStepIds: ['details'],
+          pausedAt: 'details',
+          pauseReason: 'unknown_field',
+          refusal: null,
+          reachedReview: false,
+        };
+        return Promise.resolve(outcome);
+      },
+    } as unknown as ApplicationRunner;
+  }
+
+  function buildDriven(options?: {
+    origin?: string;
+    approvedDocument?: ApprovedDocument | null;
+  }): ReturnType<typeof buildServer> {
+    const documentRepository = new InMemoryDocumentRepository();
+    const artifactStore = new InMemoryArtifactStore();
+    return buildServer({
+      profileService: new ProfileService(new InMemoryProfileRepository(), cipher),
+      documentService: new DocumentService(documentRepository, artifactStore, cipher),
+      cvProcessingService: new CvProcessingService(documentRepository, artifactStore, cipher, {
+        scan: () => Promise.resolve(),
+      }),
+      adminToken,
+      tracking: {
+        stores: trackingStores,
+        sitePolicyFor: (domain) => new SqlSitePolicyStore(database.db).findByDomain(domain),
+        listSitePolicies: () => new SqlSitePolicyStore(database.db).list(),
+        notificationsConfigured: false,
+        manualSourceKey: 'myjobscotland_manual',
+        schedulerEnabled: false,
+      },
+      applications: {
+        stores: applicationStores,
+        tracking: trackingStores,
+        workflow,
+        adapter,
+        cipher,
+        fakeAtsOrigin: options?.origin ?? ORIGIN,
+        drive: {
+          runner: stubRunner(),
+          loadFacts: () => Promise.resolve(syntheticFacts),
+          loadApprovedDocument: () => Promise.resolve(options?.approvedDocument ?? null),
+          policyVersion: 'test-drive-policy',
+        },
+      },
+    });
+  }
+
+  /** Gives the attempt a session so the route does not call out to the fake ATS. */
+  async function withSession(applicationId: string): Promise<void> {
+    const attempt = await applicationStores.attempts.current(applicationId);
+    if (attempt === null) throw new Error('expected an attempt');
+    await applicationStores.attempts.setSessionRef(attempt.id, 'seeded-session', new Date());
+  }
+
+  /** Closes whatever the planning step opened, so a run is allowed to proceed. */
+  async function clearQuestions(applicationId: string): Promise<void> {
+    const attempt = await applicationStores.attempts.current(applicationId);
+    if (attempt === null) throw new Error('expected an attempt');
+    await applicationStores.questions.supersedeOpen(attempt.id, new Date());
+  }
+
+  beforeEach(() => {
+    captured = [];
+  });
+
+  it('refuses to start when the build cannot drive a browser', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/start`,
+      headers: auth,
+      payload: { jobId },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ error: 'driving_unavailable' });
+  });
+
+  it('requires the admin token', async () => {
+    const driven = buildDriven();
+    const response = await driven.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/start`,
+      payload: { jobId },
+    });
+    expect(response.statusCode).toBe(401);
+    await driven.close();
+  });
+
+  it('refuses a job that is not on the tracker for this user', async () => {
+    const driven = buildDriven();
+    const response = await driven.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/start`,
+      headers: auth,
+      payload: { jobId: uuidv7() },
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: 'unknown_job' });
+    expect(captured).toHaveLength(0);
+    await driven.close();
+  });
+
+  it('never tells the runner it may submit', async () => {
+    const { applicationId } = await startPausedApplication();
+    await withSession(applicationId);
+    await clearQuestions(applicationId);
+
+    const driven = buildDriven();
+    const response = await driven.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/start`,
+      headers: auth,
+      payload: { jobId },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      autoSubmitEnabled: false,
+      realEmployerAutomation: false,
+      pauseReason: 'unknown_field',
+    });
+    expect(only(captured).sitePolicy).toEqual({
+      origin: ORIGIN,
+      applyMode: 'manual_only',
+      submitPermitted: false,
+    });
+    expect(only(captured).startUrl).toBe(`${ORIGIN}/apply/seeded-session/details`);
+    await driven.close();
+  });
+
+  it('will not run while a question is waiting for the user', async () => {
+    const { applicationId } = await startPausedApplication();
+    await withSession(applicationId);
+    const driven = buildDriven();
+    const response = await driven.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/${applicationId}/advance`,
+      headers: auth,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ error: 'questions_open' });
+    expect(captured).toHaveLength(0);
+    await driven.close();
+  });
+
+  it('creates no second application when start is repeated', async () => {
+    const { applicationId } = await startPausedApplication();
+    await withSession(applicationId);
+    await clearQuestions(applicationId);
+
+    const driven = buildDriven();
+    for (let round = 0; round < 2; round += 1) {
+      const response = await driven.inject({
+        method: 'POST',
+        url: `/v1/applications/${userId}/start`,
+        headers: auth,
+        payload: { jobId },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ applicationId });
+    }
+    expect(await applicationStores.applications.list(userId, 25)).toHaveLength(1);
+    const current = await applicationStores.attempts.current(applicationId);
+    expect(current?.attemptNo).toBe(1);
+    await driven.close();
+  });
+
+  it('reuses the session it already opened rather than starting another', async () => {
+    const { applicationId } = await startPausedApplication();
+    await withSession(applicationId);
+    await clearQuestions(applicationId);
+    const driven = buildDriven();
+    for (let round = 0; round < 2; round += 1) {
+      await driven.inject({
+        method: 'POST',
+        url: `/v1/applications/${userId}/${applicationId}/advance`,
+        headers: auth,
+      });
+    }
+    expect(captured.map((input) => input.startUrl)).toEqual([
+      `${ORIGIN}/apply/seeded-session/details`,
+      `${ORIGIN}/apply/seeded-session/details`,
+    ]);
+    await driven.close();
+  });
+
+  it('says so plainly when the practice job site is not running', async () => {
+    const driven = buildDriven({ origin: 'http://127.0.0.1:3399' });
+    const response = await driven.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/start`,
+      headers: auth,
+      payload: { jobId },
+    });
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toMatchObject({ error: 'fake_ats_unavailable' });
+    expect(captured).toHaveLength(0);
+    await driven.close();
+  });
+
+  it('will not advance an application belonging to someone else', async () => {
+    const { applicationId } = await startPausedApplication();
+    const driven = buildDriven();
+    const response = await driven.inject({
+      method: 'POST',
+      url: `/v1/applications/${uuidv7()}/${applicationId}/advance`,
+      headers: auth,
+    });
+    expect(response.statusCode).toBe(404);
+    expect(captured).toHaveLength(0);
+    await driven.close();
+  });
+
+  it('hands the runner the approved CV and the verified facts, and returns neither', async () => {
+    const { applicationId } = await startPausedApplication();
+    await withSession(applicationId);
+    await clearQuestions(applicationId);
+    const approved: ApprovedDocument = {
+      documentId: uuidv7(),
+      sha256: 'f'.repeat(64),
+      filename: 'cv.pdf',
+      contentBase64: Buffer.from('%PDF-1.4 synthetic').toString('base64'),
+    };
+    const driven = buildDriven({ approvedDocument: approved });
+    const response = await driven.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/${applicationId}/advance`,
+      headers: auth,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(only(captured).approvedDocument).toEqual(approved);
+    expect(only(captured).facts).toHaveLength(syntheticFacts.length);
+    // The response is a progress report, not a data export.
+    expect(response.body).not.toContain(approved.contentBase64);
+    expect(response.body).not.toContain('sam.tester@example.test');
+    await driven.close();
   });
 });

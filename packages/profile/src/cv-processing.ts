@@ -100,6 +100,35 @@ export class CvProcessingService {
     return safeDocument(document);
   }
 
+  /**
+   * The approved CV, ready to upload to a form. It returns nothing unless the document has been
+   * explicitly approved, and it re-checks the hash before handing the bytes out, so an artifact
+   * changed underneath the record cannot be uploaded in place of the reviewed one.
+   *
+   * The bytes are returned only to the caller that uploads them; they are never logged, never put
+   * in an API response and never placed in model context.
+   */
+  async approvedUpload(userId: string): Promise<{
+    documentId: string;
+    sha256: string;
+    filename: string;
+    contentBase64: string;
+  } | null> {
+    const document = await this.repository.getLatestDocument(userId, 'cv');
+    if (document?.approved !== true) return null;
+    const envelope = await this.artifacts.get(document.objectKey);
+    const bytes = this.cipher.decryptBytes(envelope, artifactAssociatedData(document));
+    if (createHash('sha256').update(bytes).digest('hex') !== document.sha256) {
+      throw new Error('CV integrity check failed');
+    }
+    return {
+      documentId: document.id,
+      sha256: document.sha256,
+      filename: document.mimeType === PDF ? 'cv.pdf' : 'cv.docx',
+      contentBase64: bytes.toString('base64'),
+    };
+  }
+
   async processLatest(userId: string): Promise<CvReview> {
     const document = await this.repository.getLatestDocument(userId, 'cv');
     if (document === null) throw new Error('No CV has been uploaded');

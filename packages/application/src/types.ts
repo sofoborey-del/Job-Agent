@@ -44,6 +44,9 @@ export type AttemptRecord = {
   pauseReason: string | null;
   checkpoint: Checkpoint | null;
   answerManifestHash: string | null;
+  /** The adapter's own session identifier for this attempt. For the fake ATS it is the path
+   *  segment its start endpoint issues, so a later request can resume the same session. */
+  sessionRef: string | null;
   leaseOwner: string | null;
   leaseExpiresAt: string | null;
   startedAt: string;

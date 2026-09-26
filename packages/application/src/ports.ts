@@ -69,6 +69,7 @@ export interface AttemptRepository {
     now: Date;
   }): Promise<void>;
   setManifestHash(attemptId: string, manifestHash: string, now: Date): Promise<void>;
+  setSessionRef(attemptId: string, sessionRef: string, now: Date): Promise<void>;
   acquireLease(input: {
     attemptId: string;
     owner: string;

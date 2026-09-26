@@ -3,6 +3,8 @@ import { z } from 'zod';
 
 import type { ApplicationStores, ApplicationWorkflowService } from '@job-agent/application';
 import type { AdapterContract } from '@job-agent/browser-core';
+import type { KnowledgeFact } from '@job-agent/domain';
+import type { ApplicationRunner, RunOutcome } from '@job-agent/orchestrator';
 import type {
   ApplicationCommandPort,
   ApplicationSummaryView,
@@ -15,6 +17,25 @@ import type { TrackingStores } from '@job-agent/tracking';
 
 import { applicationsPageHtml } from './applications-page.js';
 
+export type ApprovedDocument = {
+  documentId: string;
+  sha256: string;
+  filename: string;
+  contentBase64: string;
+};
+
+/**
+ * What a route needs in order to actually drive the browser. It is optional: without it the start
+ * and advance routes refuse with `driving_unavailable` rather than half-working, which is what the
+ * screens showed before this existed.
+ */
+export type ApplicationDrive = {
+  runner: ApplicationRunner;
+  loadFacts: (userId: string) => Promise<readonly KnowledgeFact<unknown>[]>;
+  loadApprovedDocument: (userId: string) => Promise<ApprovedDocument | null>;
+  policyVersion: string;
+};
+
 export type ApplicationRuntime = {
   stores: ApplicationStores;
   tracking: TrackingStores;
@@ -22,6 +43,7 @@ export type ApplicationRuntime = {
   adapter: AdapterContract;
   cipher: FieldCipher;
   fakeAtsOrigin: string;
+  drive?: ApplicationDrive | null;
 };
 
 const answerSchema = z.object({
@@ -35,6 +57,8 @@ const decisionSchema = z.object({
   manifestHash: z.string().length(64),
   reason: z.string().max(400).optional(),
 });
+
+const startSchema = z.object({ jobId: z.uuid() });
 
 const reviewSchema = z.object({
   jobId: z.uuid(),
@@ -251,6 +275,151 @@ export function registerApplicationRoutes(app: FastifyInstance, runtime: Applica
           .send({ error: result.reason, message: result.message });
       }
       return reply.send({ completed: true, message: result.message });
+    },
+  );
+
+  /**
+   * Opens a fake-ATS session for an attempt that has none yet, and remembers it on the attempt so a
+   * later advance resumes the same session rather than starting a second one.
+   */
+  async function sessionRefFor(attemptId: string, existing: string | null): Promise<string | null> {
+    if (existing !== null && existing !== '') return existing;
+    let response: Response;
+    try {
+      response = await fetch(`${runtime.fakeAtsOrigin}/apply/practice/start`, {
+        method: 'POST',
+        redirect: 'manual',
+      });
+    } catch {
+      return null;
+    }
+    const location = response.headers.get('location');
+    if (location === null) return null;
+    const reference = location.split('/')[2] ?? '';
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(reference)) return null;
+    await runtime.stores.attempts.setSessionRef(attemptId, reference, new Date());
+    return reference;
+  }
+
+  function describe(outcome: RunOutcome): Record<string, unknown> {
+    return {
+      target: 'local fake ATS',
+      realEmployerAutomation: false,
+      autoSubmitEnabled: false,
+      finishedSteps: outcome.finishedStepIds,
+      pausedAt: outcome.pausedAt,
+      pauseReason: outcome.pauseReason,
+      refusal: outcome.refusal,
+      reachedReview: outcome.reachedReview,
+    };
+  }
+
+  /**
+   * Runs the attempt until it pauses. Shared by start and advance so both behave identically once
+   * an attempt exists. The runner stops at the first question, human-only step or refusal; it never
+   * submits.
+   */
+  async function drive(
+    drive_: ApplicationDrive,
+    userId: string,
+    applicationId: string,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const attempt = await runtime.stores.attempts.current(applicationId);
+    if (attempt === null) return { status: 404, body: { error: 'no_attempt' } };
+
+    const open = await runtime.stores.questions.listOpen(applicationId);
+    if (open.length > 0) {
+      return {
+        status: 409,
+        body: {
+          error: 'questions_open',
+          message: `Answer the ${String(open.length)} open question(s) first; the agent will not guess.`,
+        },
+      };
+    }
+
+    const sessionRef = await sessionRefFor(attempt.id, attempt.sessionRef);
+    if (sessionRef === null) {
+      return {
+        status: 502,
+        body: {
+          error: 'fake_ats_unavailable',
+          message: 'The practice job site did not answer. Start it with "pnpm fake-ats".',
+        },
+      };
+    }
+
+    const outcome = await drive_.runner.runUntilPause({
+      attemptId: attempt.id,
+      startUrl: `${runtime.fakeAtsOrigin}/apply/${sessionRef}/details`,
+      facts: await drive_.loadFacts(userId),
+      approvedDocument: await drive_.loadApprovedDocument(userId),
+      sitePolicy: {
+        origin: runtime.fakeAtsOrigin,
+        applyMode: 'manual_only',
+        submitPermitted: false,
+      },
+      correlationId: newCorrelationId(),
+    });
+    return { status: 200, body: { applicationId, ...describe(outcome) } };
+  }
+
+  app.post<{ Params: { userId: string } }>(
+    '/v1/applications/:userId/start',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      const body = startSchema.safeParse(request.body);
+      if (!userId.success || !body.success)
+        return reply.code(400).send({ error: 'invalid_request' });
+
+      const driving = runtime.drive;
+      if (driving === undefined || driving === null) {
+        return reply.code(503).send({
+          error: 'driving_unavailable',
+          message: 'This build cannot drive the practice job site.',
+        });
+      }
+
+      const job = await runtime.tracking.tracking.detail(userId.data, body.data.jobId);
+      if (job === null) return reply.code(404).send({ error: 'unknown_job' });
+
+      // Idempotent by job: a second start returns the running attempt rather than creating another.
+      await runtime.workflow.startAttempt({
+        userId: userId.data,
+        jobId: body.data.jobId,
+        matchRunId: null,
+        policyVersion: driving.policyVersion,
+        targetOrigin: runtime.fakeAtsOrigin,
+      });
+      const application = await runtime.stores.applications.findByJob(userId.data, body.data.jobId);
+      if (application === null) return reply.code(500).send({ error: 'application_missing' });
+
+      const result = await drive(driving, userId.data, application.id);
+      return reply.code(result.status).header('cache-control', 'no-store').send(result.body);
+    },
+  );
+
+  app.post<{ Params: { userId: string; applicationId: string } }>(
+    '/v1/applications/:userId/:applicationId/advance',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      const applicationId = z.uuid().safeParse(request.params.applicationId);
+      if (!userId.success || !applicationId.success) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const driving = runtime.drive;
+      if (driving === undefined || driving === null) {
+        return reply.code(503).send({
+          error: 'driving_unavailable',
+          message: 'This build cannot drive the practice job site.',
+        });
+      }
+      const application = await runtime.stores.applications.get(applicationId.data);
+      if (application?.userId !== userId.data) {
+        return reply.code(404).send({ error: 'unknown_application' });
+      }
+      const result = await drive(driving, userId.data, applicationId.data);
+      return reply.code(result.status).header('cache-control', 'no-store').send(result.body);
     },
   );
 

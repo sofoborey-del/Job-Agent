@@ -230,6 +230,7 @@ function mapAttempt(row: SqlRow): AttemptRecord {
     pauseReason: asNullableText(row.pause_reason),
     checkpoint: parsed.success ? parsed.data : null,
     answerManifestHash: asNullableText(row.answer_manifest_hash),
+    sessionRef: asNullableText(row.session_ref),
     leaseOwner: asNullableText(row.lease_owner),
     leaseExpiresAt: isoOrNull(row.lease_expires_at),
     startedAt: iso(row.started_at, new Date().toISOString()),
@@ -238,8 +239,8 @@ function mapAttempt(row: SqlRow): AttemptRecord {
 }
 
 const attemptColumns = `id, application_id, attempt_no, adapter_id, adapter_version, target_origin,
-  status, pause_reason, checkpoint_json, answer_manifest_hash, lease_owner, lease_expires_at,
-  started_at, finished_at`;
+  status, pause_reason, checkpoint_json, answer_manifest_hash, session_ref, lease_owner,
+  lease_expires_at, started_at, finished_at`;
 
 export class SqlAttemptRepository implements AttemptRepository {
   constructor(private readonly db: SqlDatabase) {}
@@ -321,6 +322,13 @@ export class SqlAttemptRepository implements AttemptRepository {
     await this.db.query(
       `UPDATE application_attempts SET answer_manifest_hash = $2, updated_at = $3 WHERE id = $1`,
       [attemptId, manifestHash, now],
+    );
+  }
+
+  async setSessionRef(attemptId: string, sessionRef: string, now: Date): Promise<void> {
+    await this.db.query(
+      `UPDATE application_attempts SET session_ref = $2, updated_at = $3 WHERE id = $1`,
+      [attemptId, sessionRef, now],
     );
   }
 
