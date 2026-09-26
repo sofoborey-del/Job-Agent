@@ -69,6 +69,27 @@ const syntheticFacts: KnowledgeFact<unknown>[] = [
   fact('contact.email', 'sam.tester@example.test'),
 ];
 
+/** The equal-opportunities step. Every field here is one only a person may answer. */
+function sensitiveInventory(): FieldInventory {
+  return {
+    stepId: 'questions',
+    url: `${ORIGIN}/apply/abc/questions`,
+    pageFingerprint: 'e'.repeat(64),
+    fields: [
+      {
+        fieldKey: 'disability',
+        label: 'Do you consider yourself to have a disability?',
+        controlType: 'radio',
+        selector: '[name="disability"]',
+        required: true,
+        options: ['Yes', 'No', 'Prefer not to say'],
+      },
+    ],
+    validationMessages: [],
+    humanOnlyMarkers: [],
+  };
+}
+
 function detailsInventory(): FieldInventory {
   return {
     stepId: 'details',
@@ -353,6 +374,114 @@ describe('the application API', () => {
     expect(stale.statusCode).toBe(409);
     expect(stale.json()).toMatchObject({ error: 'stale_manifest' });
     expect(manifestHash).not.toBe('f'.repeat(64));
+  });
+
+  /**
+   * A sensitive step opens `human_action` questions, which the answer route refuses by design.
+   * Without the confirmation route below there is no way to close them from the screens, and the
+   * run can never be resumed. This covers the route surface, not just the workflow.
+   */
+  it('lets the user confirm a human-only step from the screens, and then resume', async () => {
+    const ids = await startPausedApplication();
+    await workflow.planStep({
+      attemptId: ids.attemptId,
+      inventory: sensitiveInventory(),
+      facts: syntheticFacts,
+      approvedDocument: null,
+    });
+    const sensitive = (await applicationStores.questions.listOpen(ids.applicationId)).filter(
+      (question) => question.responseKind === 'human_action',
+    );
+    expect(sensitive.length).toBeGreaterThan(0);
+
+    // The answer route must keep refusing these.
+    const refusedAnswer = await app.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/${ids.applicationId}/questions/${only(sensitive).id}/answer`,
+      headers: auth,
+      payload: { value: 'Yes' },
+    });
+    expect(refusedAnswer.statusCode).toBe(409);
+
+    // Confirming before taking over is refused, so the sequence stays honest.
+    const tooEarly = await app.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/${ids.applicationId}/questions/${only(sensitive).id}/completed`,
+      headers: auth,
+      payload: {},
+    });
+    expect(tooEarly.statusCode).toBe(409);
+    expect(tooEarly.json()).toMatchObject({ error: 'takeover_not_active' });
+
+    await app.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/${ids.applicationId}/takeover`,
+      headers: auth,
+    });
+    for (const question of await applicationStores.questions.listOpen(ids.applicationId)) {
+      if (question.responseKind !== 'human_action') {
+        await app.inject({
+          method: 'POST',
+          url: `/v1/applications/${userId}/${ids.applicationId}/questions/${question.id}/answer`,
+          headers: auth,
+          payload: { value: 'Blue' },
+        });
+        continue;
+      }
+      const done = await app.inject({
+        method: 'POST',
+        url: `/v1/applications/${userId}/${ids.applicationId}/questions/${question.id}/completed`,
+        headers: auth,
+        payload: {},
+      });
+      expect(done.statusCode).toBe(200);
+      expect(done.json()).toMatchObject({ completed: true });
+    }
+
+    const resumed = await app.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/${ids.applicationId}/resume`,
+      headers: auth,
+    });
+    expect(resumed.json()).toMatchObject({ resumed: true });
+  });
+
+  it('never returns what the user entered on a human-only step', async () => {
+    const ids = await startPausedApplication();
+    await workflow.planStep({
+      attemptId: ids.attemptId,
+      inventory: sensitiveInventory(),
+      facts: syntheticFacts,
+      approvedDocument: null,
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/${ids.applicationId}/takeover`,
+      headers: auth,
+    });
+    const question = only(
+      (await applicationStores.questions.listOpen(ids.applicationId)).filter(
+        (candidate) => candidate.responseKind === 'human_action',
+      ),
+    );
+    await app.inject({
+      method: 'POST',
+      url: `/v1/applications/${userId}/${ids.applicationId}/questions/${question.id}/completed`,
+      headers: auth,
+      payload: {},
+    });
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/v1/applications/${userId}/${ids.applicationId}`,
+      headers: auth,
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.body).not.toContain('entered by the user');
+    const body = detail.json<{
+      fields: Array<{ fieldKey: string; answerPreview: string | null }>;
+    }>();
+    const field = body.fields.find((candidate) => candidate.fieldKey === question.fieldKey);
+    if (field !== undefined) expect(field.answerPreview).toBeNull();
   });
 
   it('records manual takeover and refuses to resume while a question is open', async () => {

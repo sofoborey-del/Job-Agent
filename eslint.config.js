@@ -7,6 +7,7 @@ export default tseslint.config(
       'eslint.config.js',
       'vitest.config.ts',
       'scripts/*.mjs',
+      'local-data/**',
       '**/dist/**',
       '**/node_modules/**',
       '**/coverage/**',

@@ -70,6 +70,35 @@ const syntheticFacts: KnowledgeFact<unknown>[] = [
   fact('statement.supporting', 'A synthetic statement for the local fake ATS test suite.'),
 ];
 
+/** The equal-opportunities step. Every field here is one only a person may answer. */
+function sensitiveInventory(): FieldInventory {
+  return {
+    stepId: 'questions',
+    url: `${ORIGIN}/apply/abc/questions`,
+    pageFingerprint: 'e'.repeat(64),
+    fields: [
+      {
+        fieldKey: 'disability',
+        label: 'Do you consider yourself to have a disability?',
+        controlType: 'radio',
+        selector: '[name="disability"]',
+        required: true,
+        options: ['Yes', 'No', 'Prefer not to say'],
+      },
+      {
+        fieldKey: 'ethnicity',
+        label: 'Ethnic group, for diversity monitoring',
+        controlType: 'select',
+        selector: '[name="ethnicity"]',
+        required: true,
+        options: ['Prefer not to say', 'Group A'],
+      },
+    ],
+    validationMessages: [],
+    humanOnlyMarkers: [],
+  };
+}
+
 function detailsInventory(overrides: Partial<FieldInventory> = {}): FieldInventory {
   return {
     stepId: 'details',
@@ -857,6 +886,135 @@ describe('takeover, resume and duplicate delivery', () => {
     expect(resumed.resumed).toBe(true);
     expect(resumed.state.state).toBe('FILLING');
     expect(resumed.state.takeoverRequestedAt).toBeNull();
+  });
+
+  /**
+   * A human-only question cannot be answered, only confirmed as done. Without that confirmation the
+   * run reaches a sensitive step and can never be resumed, because `resume` refuses while any
+   * question is open. These tests pin the way out, and the guards on it.
+   */
+  it('resumes after the user confirms they completed the human-only step themselves', async () => {
+    const ids = await startAttempt();
+    const plan = await workflow.planStep({
+      attemptId: ids.attemptId,
+      inventory: sensitiveInventory(),
+      facts: syntheticFacts,
+      approvedDocument: null,
+    });
+    expect(plan.pauseReason).toBe('human_only_step');
+    const open = await stores.questions.listOpen(ids.applicationId);
+    expect(open.length).toBeGreaterThan(0);
+    expect(open.every((question) => question.responseKind === 'human_action')).toBe(true);
+
+    // The deadlock this fixes: takeover alone leaves the questions open, so resume refuses.
+    await workflow.requestTakeover({ applicationId: ids.applicationId });
+    const blocked = await workflow.resume({ applicationId: ids.applicationId });
+    expect(blocked.resumed).toBe(false);
+
+    for (const question of open) {
+      const confirmed = await workflow.confirmHumanStepCompleted({
+        applicationId: ids.applicationId,
+        questionId: question.id,
+      });
+      expect(confirmed.completed).toBe(true);
+    }
+    const resumed = await workflow.resume({ applicationId: ids.applicationId });
+    expect(resumed.resumed).toBe(true);
+    expect(resumed.state.state).toBe('FILLING');
+  });
+
+  it('keeps no record of what the user entered on a human-only step', async () => {
+    const ids = await startAttempt();
+    await workflow.planStep({
+      attemptId: ids.attemptId,
+      inventory: sensitiveInventory(),
+      facts: syntheticFacts,
+      approvedDocument: null,
+    });
+    await workflow.requestTakeover({ applicationId: ids.applicationId });
+    const question = only(await stores.questions.listOpen(ids.applicationId));
+    await workflow.confirmHumanStepCompleted({
+      applicationId: ids.applicationId,
+      questionId: question.id,
+    });
+    const row = await database.db.query<{ answer_ciphertext: Buffer | null; state: string }>(
+      'SELECT answer_ciphertext, state FROM application_questions WHERE id = $1',
+      [question.id],
+    );
+    expect(only(row.rows).state).toBe('answered');
+    expect(only(row.rows).answer_ciphertext).toBeNull();
+  });
+
+  it('refuses to confirm a human-only step before takeover is active', async () => {
+    const ids = await startAttempt();
+    await workflow.planStep({
+      attemptId: ids.attemptId,
+      inventory: sensitiveInventory(),
+      facts: syntheticFacts,
+      approvedDocument: null,
+    });
+    const question = only(await stores.questions.listOpen(ids.applicationId));
+    // planStep pauses into WAITING_TAKEOVER, but the user has not chosen to take over yet.
+    await stores.applications.setTakeover({
+      applicationId: ids.applicationId,
+      requested: false,
+      correlationId: uuidv7(),
+      now: new Date(),
+    });
+    const refused = await workflow.confirmHumanStepCompleted({
+      applicationId: ids.applicationId,
+      questionId: question.id,
+    });
+    expect(refused.completed).toBe(false);
+    expect(refused.reason).toBe('takeover_not_active');
+  });
+
+  it('refuses to confirm a question that expects a real answer', async () => {
+    const ids = await startAttempt();
+    await workflow.planStep({
+      attemptId: ids.attemptId,
+      inventory: detailsInventory(),
+      facts: syntheticFacts,
+      approvedDocument: null,
+    });
+    await workflow.requestTakeover({ applicationId: ids.applicationId });
+    const question = only(await stores.questions.listOpen(ids.applicationId));
+    expect(question.responseKind).not.toBe('human_action');
+    const refused = await workflow.confirmHumanStepCompleted({
+      applicationId: ids.applicationId,
+      questionId: question.id,
+    });
+    expect(refused.completed).toBe(false);
+    expect(refused.reason).toBe('not_a_human_step');
+  });
+
+  it('treats a replayed confirmation as harmless', async () => {
+    const ids = await startAttempt();
+    await workflow.planStep({
+      attemptId: ids.attemptId,
+      inventory: sensitiveInventory(),
+      facts: syntheticFacts,
+      approvedDocument: null,
+    });
+    await workflow.requestTakeover({ applicationId: ids.applicationId });
+    const question = only(await stores.questions.listOpen(ids.applicationId));
+    const first = await workflow.confirmHumanStepCompleted({
+      applicationId: ids.applicationId,
+      questionId: question.id,
+    });
+    const again = await workflow.confirmHumanStepCompleted({
+      applicationId: ids.applicationId,
+      questionId: question.id,
+    });
+    expect(first.completed).toBe(true);
+    expect(again.completed).toBe(true);
+    expect(again.message).toContain('already');
+    const answered = await database.db.query<{ total: number }>(
+      `SELECT COUNT(*)::int AS total FROM application_questions
+        WHERE id = $1 AND state = 'answered'`,
+      [question.id],
+    );
+    expect(only(answered.rows).total).toBe(1);
   });
 
   it('never creates two applications, or two live attempts, for the same job', async () => {

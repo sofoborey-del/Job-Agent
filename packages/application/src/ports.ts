@@ -121,6 +121,16 @@ export interface QuestionRepository {
     scope: 'application_only' | 'save_to_profile';
     now: Date;
   }): Promise<{ applied: boolean; question: QuestionRecord }>;
+  /**
+   * Records that the user completed a human-only step themselves, outside the agent.
+   *
+   * No value is stored: the agent never saw what was entered, and `answer_ciphertext` stays null.
+   * Idempotent on the question, so a replayed confirmation changes nothing.
+   */
+  markCompletedByUser(input: {
+    questionId: string;
+    now: Date;
+  }): Promise<{ applied: boolean; question: QuestionRecord }>;
   supersedeOpen(attemptId: string, now: Date): Promise<number>;
   readAnswers(attemptId: string): Promise<Array<{ fieldKey: string; ciphertext: Buffer }>>;
 }

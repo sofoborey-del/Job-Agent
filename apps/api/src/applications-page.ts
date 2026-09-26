@@ -151,7 +151,7 @@ export const applicationsPageHtml = String.raw`<!doctype html>
       if (!body.applications.length) {
         var empty = document.createElement('div');
         empty.className = 'muted';
-        empty.textContent = 'None yet. A practice run is started from the tracker page.';
+        empty.textContent = 'None yet. A practice run is started with scripts/phase-2-screen-walkthrough.mjs; see docs/runbooks/phase-2-fake-ats.md.';
         container.append(empty);
         say('No practice applications yet.');
         return;
@@ -220,8 +220,24 @@ export const applicationsPageHtml = String.raw`<!doctype html>
       if (question.responseKind === 'human_action') {
         var human = document.createElement('div');
         human.className = 'note';
-        human.textContent = 'This one has to be done by you in the browser. Use "I will take over", complete it, then choose Resume.';
-        box.append(human);
+        human.textContent = 'This one has to be done by you in the browser. Use "I will take over", complete it there, then confirm it below. The agent never sees what you entered.';
+        var done = document.createElement('button');
+        done.type = 'button';
+        done.textContent = 'I completed this myself';
+        done.addEventListener('click', function () {
+          done.disabled = true;
+          request('/v1/applications/:userId/' + detail.application.applicationId + '/questions/' + question.questionId + '/completed', {
+            method: 'POST',
+            body: JSON.stringify({})
+          }).then(function (body) {
+            say(body.message);
+            loadDetail(detail.application.applicationId);
+          }).catch(function (error) { say(error.message, true); done.disabled = false; });
+        });
+        var humanActions = document.createElement('div');
+        humanActions.className = 'actions';
+        humanActions.append(done);
+        box.append(human, humanActions);
       } else {
         var label = document.createElement('label');
         label.textContent = 'Your answer';

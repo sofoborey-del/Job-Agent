@@ -229,6 +229,31 @@ export function registerApplicationRoutes(app: FastifyInstance, runtime: Applica
     },
   );
 
+  // Confirms that the user dealt with a human-only step themselves. Without this there is no way to
+  // close a `human_action` question from the screens, and a run that pauses on a sensitive step,
+  // CAPTCHA, one-time code or declaration can never be resumed. No answer value is accepted here:
+  // the agent does not learn what was entered.
+  app.post<{ Params: { userId: string; applicationId: string; questionId: string } }>(
+    '/v1/applications/:userId/:applicationId/questions/:questionId/completed',
+    async (request, reply) => {
+      const applicationId = z.uuid().safeParse(request.params.applicationId);
+      const questionId = z.uuid().safeParse(request.params.questionId);
+      if (!applicationId.success || !questionId.success) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const result = await runtime.workflow.confirmHumanStepCompleted({
+        applicationId: applicationId.data,
+        questionId: questionId.data,
+      });
+      if (!result.completed) {
+        return reply
+          .code(result.reason === 'unknown_question' ? 404 : 409)
+          .send({ error: result.reason, message: result.message });
+      }
+      return reply.send({ completed: true, message: result.message });
+    },
+  );
+
   app.post<{ Params: { userId: string; applicationId: string } }>(
     '/v1/applications/:userId/:applicationId/review',
     async (request, reply) => {

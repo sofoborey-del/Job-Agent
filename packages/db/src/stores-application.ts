@@ -570,6 +570,30 @@ export class SqlQuestionRepository implements QuestionRepository {
     };
   }
 
+  async markCompletedByUser(
+    input: Parameters<QuestionRepository['markCompletedByUser']>[0],
+  ): Promise<{ applied: boolean; question: QuestionRecord }> {
+    // answer_ciphertext and answer_scope stay null on purpose: the user did this step themselves and
+    // the agent holds no record of what they entered.
+    const updated = await this.db.query(
+      `UPDATE application_questions
+          SET state = 'answered', answered_at = $2
+        WHERE id = $1 AND state = 'open' AND response_kind = 'human_action'
+      RETURNING ${questionColumns}`,
+      [input.questionId, input.now],
+    );
+    const row = firstRow(updated);
+    if (row !== null) return { applied: true, question: mapQuestion(row) };
+    const existing = await this.db.query(
+      `SELECT ${questionColumns} FROM application_questions WHERE id = $1`,
+      [input.questionId],
+    );
+    return {
+      applied: false,
+      question: mapQuestion(requireRow(existing, 'Unknown question')),
+    };
+  }
+
   async supersedeOpen(attemptId: string, now: Date): Promise<number> {
     const result = await this.db.query(
       `UPDATE application_questions SET state = 'superseded', answered_at = $2

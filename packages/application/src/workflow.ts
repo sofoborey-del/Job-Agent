@@ -797,6 +797,65 @@ export class ApplicationWorkflowService {
     });
   }
 
+  /**
+   * Records that the user completed a human-only step themselves, so the run can be resumed.
+   *
+   * This is the only way a `human_action` question is closed, and it deliberately stores no value:
+   * the agent did not see the CAPTCHA, the one-time code, the declaration or the sensitive answer,
+   * and this records only that the person dealt with it.
+   *
+   * Takeover must already be active. That keeps the sequence honest — the agent stops, the person
+   * takes over, the person confirms — rather than letting a human-only step be waved through while
+   * the agent is still driving.
+   */
+  async confirmHumanStepCompleted(input: {
+    applicationId: string;
+    questionId: string;
+    correlationId?: string;
+    now?: Date;
+  }): Promise<{ completed: boolean; reason?: string; message: string }> {
+    const now = input.now ?? new Date();
+    const { stores } = this.options;
+    const question = await stores.questions.get(input.questionId);
+    if (question?.applicationId !== input.applicationId) {
+      return { completed: false, reason: 'unknown_question', message: 'No such question.' };
+    }
+    if (question.responseKind !== 'human_action') {
+      return {
+        completed: false,
+        reason: 'not_a_human_step',
+        message: 'That question expects an answer from you, not a confirmation.',
+      };
+    }
+    const application = await stores.applications.get(input.applicationId);
+    if (application === null) {
+      return { completed: false, reason: 'unknown_application', message: 'No such application.' };
+    }
+    if (application.takeoverRequestedAt === null) {
+      return {
+        completed: false,
+        reason: 'takeover_not_active',
+        message: 'Choose "I will take over" first, then complete the step and confirm it here.',
+      };
+    }
+
+    const result = await stores.questions.markCompletedByUser({
+      questionId: input.questionId,
+      now,
+    });
+    this.logger.log('info', 'A human-only step was confirmed as completed by the user', {
+      applicationId: input.applicationId,
+      fieldKey: question.fieldKey,
+      applied: result.applied,
+    });
+    return {
+      completed: true,
+      message: result.applied
+        ? 'Recorded that you completed this yourself. The agent kept no copy of it.'
+        : 'That was already recorded. Nothing was repeated.',
+    };
+  }
+
   async resume(input: {
     applicationId: string;
     correlationId?: string;
