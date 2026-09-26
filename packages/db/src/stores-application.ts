@@ -98,6 +98,37 @@ async function appendEvent(
 export class SqlApplicationRepository implements ApplicationRepository {
   constructor(private readonly db: SqlDatabase) {}
 
+  async externalSubmission(
+    userId: string,
+    jobId: string,
+  ): Promise<{
+    providerReference: string;
+    submittedAt: string;
+    evidenceSource: 'user_report';
+  } | null> {
+    const result = await this.db.query(
+      'SELECT provider_reference, submitted_at FROM external_submissions WHERE user_id = $1 AND job_id = $2',
+      [userId, jobId],
+    );
+    const row = firstRow(result);
+    return row === null
+      ? null
+      : {
+          providerReference: asText(row.provider_reference),
+          submittedAt: iso(row.submitted_at, ''),
+          evidenceSource: 'user_report',
+        };
+  }
+
+  async recordExternalSubmission(
+    input: Parameters<ApplicationRepository['recordExternalSubmission']>[0],
+  ): Promise<void> {
+    await this.db.query(
+      'INSERT INTO external_submissions (user_id, job_id, provider_reference, submitted_at) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id, job_id) DO NOTHING',
+      [input.userId, input.jobId, input.providerReference, input.submittedAt],
+    );
+  }
+
   async create(input: Parameters<ApplicationRepository['create']>[0]): Promise<ApplicationRecord> {
     return this.db.transaction(async (tx) => {
       const inserted = await tx.query(

@@ -104,6 +104,11 @@ export class ApplicationWorkflowService {
     const now = input.now ?? new Date();
     const correlationId = input.correlationId ?? newCorrelationId();
     const { stores, adapter } = this.options;
+    if ((await stores.applications.externalSubmission(input.userId, input.jobId)) !== null) {
+      throw new Error(
+        'This job has already been submitted outside the agent. A new attempt is blocked.',
+      );
+    }
     const existing = await stores.applications.findByJob(input.userId, input.jobId);
     const application =
       existing ??

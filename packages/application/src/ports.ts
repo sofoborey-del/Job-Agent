@@ -15,6 +15,20 @@ import type {
 } from './types.js';
 
 export interface ApplicationRepository {
+  externalSubmission(
+    userId: string,
+    jobId: string,
+  ): Promise<{
+    providerReference: string;
+    submittedAt: string;
+    evidenceSource: 'user_report';
+  } | null>;
+  recordExternalSubmission(input: {
+    userId: string;
+    jobId: string;
+    providerReference: string;
+    submittedAt: Date;
+  }): Promise<void>;
   create(input: {
     userId: string;
     jobId: string;

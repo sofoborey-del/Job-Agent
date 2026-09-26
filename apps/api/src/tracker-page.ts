@@ -355,8 +355,28 @@ export const trackerPageHtml = String.raw`<!doctype html>
         prepare.disabled = true;
         preparation.hidden = false;
         preparation.textContent = 'Checking this job…';
-        request('/v1/tracker/:userId/jobs/' + job.jobId, {}).then(function (detail) {
+        Promise.all([request('/v1/tracker/:userId/jobs/' + job.jobId, {}), request('/v1/applications/:userId/preparation/' + job.jobId, {})]).then(function (results) {
+          var detail = results[0];
+          var packet = results[1];
           preparation.replaceChildren();
+          var packetStatus = document.createElement('p');
+          packetStatus.textContent = packet.message;
+          preparation.append(packetStatus);
+          if (packet.status === 'submitted' || packet.status === 'blocked_closed') {
+            prepare.textContent = packet.status === 'submitted' ? 'Already submitted' : 'Unavailable';
+            return;
+          }
+          var profile = document.createElement('details');
+          var profileTitle = document.createElement('summary');
+          profileTitle.textContent = 'Review your saved application details';
+          profile.append(profileTitle);
+          (packet.facts || []).forEach(function (fact) {
+            var row = document.createElement('pre');
+            row.style.whiteSpace = 'pre-wrap';
+            row.textContent = fact.key.replace(/_/g, ' ') + '\\n' + (typeof fact.value === 'string' ? fact.value : JSON.stringify(fact.value, null, 2));
+            profile.append(row);
+          });
+          preparation.append(profile);
           var heading = document.createElement('h4');
           heading.textContent = 'Application preparation: ' + detail.title;
           var guidance = document.createElement('p');
@@ -404,6 +424,42 @@ export const trackerPageHtml = String.raw`<!doctype html>
       });
       actions.prepend(prepare);
       card.append(preparation);
+
+      var recordBox = document.createElement('details');
+      var recordTitle = document.createElement('summary');
+      recordTitle.textContent = 'I submitted this application myself';
+      recordBox.append(recordTitle);
+      var reference = document.createElement('input');
+      reference.placeholder = 'Employer confirmation or job reference';
+      reference.setAttribute('aria-label', 'Submission reference');
+      var submittedDate = document.createElement('input');
+      submittedDate.type = 'datetime-local';
+      submittedDate.setAttribute('aria-label', 'Submission date and time');
+      var recordButton = document.createElement('button');
+      recordButton.type = 'button';
+      recordButton.textContent = 'Confirm already submitted';
+      var recordMessage = document.createElement('p');
+      recordMessage.textContent = 'Only record a completed submission. This prevents another application; it does not send one.';
+      recordButton.addEventListener('click', function () {
+        var date = new Date(submittedDate.value);
+        if (!reference.value.trim() || !submittedDate.value || isNaN(date.getTime())) {
+          recordMessage.textContent = 'Enter your reference and submission date first.';
+          return;
+        }
+        recordButton.disabled = true;
+        request('/v1/applications/:userId/external-submission', {method: 'POST', body: JSON.stringify({jobId: job.jobId, providerReference: reference.value.trim(), submittedAt: date.toISOString(), confirmed: true})})
+          .then(function () { recordMessage.textContent = 'Recorded as submitted. A new application is blocked.'; prepare.textContent = 'Already submitted'; })
+          .catch(function (error) { recordMessage.textContent = error.message; })
+          .finally(function () { recordButton.disabled = false; });
+      });
+      recordBox.append(recordMessage, reference, submittedDate, recordButton);
+      card.append(recordBox);
+      request('/v1/applications/:userId/external-submission/' + job.jobId, {}).then(function (result) {
+        if (!result.submission) return;
+        pills.append(pill('Submitted — ' + result.submission.providerReference));
+        prepare.textContent = 'Already submitted';
+        recordBox.hidden = true;
+      }).catch(function () { /* Preparation still checks submission status before offering answers. */ });
 
       var details = document.createElement('details');
       var summary = document.createElement('summary');
@@ -462,7 +518,7 @@ export const trackerPageHtml = String.raw`<!doctype html>
     request('/v1/tracker/:userId/jobs' + filterQuery(), {}).then(function (body) {
       renderCounts(body.counts);
       renderJobs(body);
-      say('Showing ' + body.jobs.length + ' of ' + body.total + ' job(s). No applications have been made.');
+      say('Showing ' + body.jobs.length + ' of ' + body.total + ' job(s). Preparing does not submit an application.');
     }).catch(function (error) { say(error.message, true); });
   }
 

@@ -76,6 +76,122 @@ function associatedData(attemptId: string, fieldKey: string): string {
  * There is no route that can start, fill or submit a real employer application.
  */
 export function registerApplicationRoutes(app: FastifyInstance, runtime: ApplicationRuntime): void {
+  app.get<{ Params: { userId: string; jobId: string } }>(
+    '/v1/applications/:userId/external-submission/:jobId',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      const jobId = z.uuid().safeParse(request.params.jobId);
+      if (!userId.success || !jobId.success)
+        return reply.code(400).send({ error: 'invalid_request' });
+      if ((await runtime.tracking.tracking.detail(userId.data, jobId.data)) === null)
+        return reply.code(404).send({ error: 'unknown_job' });
+      return reply
+        .header('cache-control', 'no-store')
+        .send({
+          submission: await runtime.stores.applications.externalSubmission(userId.data, jobId.data),
+        });
+    },
+  );
+  const externalSchema = z.object({
+    jobId: z.uuid(),
+    providerReference: z.string().trim().min(1).max(120),
+    submittedAt: z.iso.datetime({ offset: true }),
+    confirmed: z.literal(true),
+  });
+  app.post<{ Params: { userId: string } }>(
+    '/v1/applications/:userId/external-submission',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      const body = externalSchema.safeParse(request.body);
+      if (!userId.success || !body.success)
+        return reply.code(400).send({ error: 'invalid_request' });
+      const job = await runtime.tracking.tracking.detail(userId.data, body.data.jobId);
+      if (job === null) return reply.code(404).send({ error: 'unknown_job' });
+      if (new Date(body.data.submittedAt).getTime() > Date.now())
+        return reply.code(400).send({ error: 'future_submission_date' });
+      await runtime.stores.applications.recordExternalSubmission({
+        userId: userId.data,
+        jobId: body.data.jobId,
+        providerReference: body.data.providerReference,
+        submittedAt: new Date(body.data.submittedAt),
+      });
+      await runtime.tracking.audit.append(
+        {
+          userId: userId.data,
+          actorType: 'user',
+          actorId: null,
+          action: 'application.external_submission_recorded',
+          resourceType: 'job',
+          resourceId: body.data.jobId,
+          result: 'succeeded',
+          policyVersion: null,
+          correlationId: newCorrelationId(),
+          metadata: { evidenceSource: 'user_report' },
+        },
+        new Date(),
+      );
+      return reply.header('cache-control', 'no-store').send({
+        status: 'submitted',
+        submission: await runtime.stores.applications.externalSubmission(
+          userId.data,
+          body.data.jobId,
+        ),
+        duplicateApplicationBlocked: true,
+      });
+    },
+  );
+  app.get<{ Params: { userId: string; jobId: string } }>(
+    '/v1/applications/:userId/preparation/:jobId',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      const jobId = z.uuid().safeParse(request.params.jobId);
+      if (!userId.success || !jobId.success)
+        return reply.code(400).send({ error: 'invalid_request' });
+      const job = await runtime.tracking.tracking.detail(userId.data, jobId.data);
+      if (job === null) return reply.code(404).send({ error: 'unknown_job' });
+      const submission = await runtime.stores.applications.externalSubmission(
+        userId.data,
+        jobId.data,
+      );
+      const closed =
+        ['closed', 'expired', 'duplicate'].includes(job.lifecycleStatus) ||
+        (job.closesAt !== null && new Date(job.closesAt).getTime() <= Date.now());
+      const facts =
+        submission !== null || closed ? [] : ((await runtime.drive?.loadFacts(userId.data)) ?? []);
+      const safeKeys =
+        /^(identity\.(first_name|last_name)|contact\.(email|phone|address)|employment\.|education\.|skills\.|certifications_licences\.)/;
+      const usable = facts.filter(
+        (f) =>
+          safeKeys.test(f.key) &&
+          f.status === 'verified' &&
+          f.usePolicy === 'auto_fill' &&
+          f.sensitivity !== 'high_risk' &&
+          f.allowedPurposes.includes('application') &&
+          (f.expiresAt === undefined || new Date(f.expiresAt).getTime() > Date.now()),
+      );
+      return reply.header('cache-control', 'no-store').send({
+        jobId: jobId.data,
+        status:
+          submission !== null ? 'submitted' : closed ? 'blocked_closed' : 'manual_preparation',
+        submission,
+        browserPrefillEnabled: false,
+        autoSubmitEnabled: false,
+        facts: usable.map((f) => ({
+          key: f.key,
+          value: f.value,
+          sourceFactId: f.id,
+          version: f.version,
+        })),
+        requirements: job.matchRun?.explanation.requirements ?? [],
+        message:
+          submission !== null
+            ? 'Already submitted: do not apply again.'
+            : closed
+              ? 'This job is closed or unavailable.'
+              : 'Verified profile answers ready for review. Real-site browser filling is not enabled yet.',
+      });
+    },
+  );
   app.get('/applications', (_request, reply) =>
     reply
       .header(
@@ -382,6 +498,12 @@ export function registerApplicationRoutes(app: FastifyInstance, runtime: Applica
 
       const job = await runtime.tracking.tracking.detail(userId.data, body.data.jobId);
       if (job === null) return reply.code(404).send({ error: 'unknown_job' });
+      if (
+        (await runtime.stores.applications.externalSubmission(userId.data, body.data.jobId)) !==
+        null
+      ) {
+        return reply.code(409).send({ error: 'already_submitted' });
+      }
 
       // Idempotent by job: a second start returns the running attempt rather than creating another.
       await runtime.workflow.startAttempt({

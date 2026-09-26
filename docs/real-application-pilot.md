@@ -8,6 +8,23 @@ Real browser prefill remains unavailable. A supported adapter must be implemente
 preparation panel can start a real attempt; the fake-ATS start endpoint must never be used as its
 replacement.
 
+## Preparation and submitted-job protection
+
+Migration 0006 adds a separate user-reported external submission ledger. It does not fabricate an
+agent attempt or claim a provider-verified receipt. Authenticated users can record a tracked job
+with its reference and timestamp through `POST /v1/applications/:userId/external-submission`.
+Repeated calls preserve the first record. Preparation and new workflow attempts block a recorded
+job. Existing in-flight attempts are not cancelled by this endpoint; do not record a job while a
+worker is active on it. Cross-source protection depends on canonical discovery deduplication.
+
+`GET /v1/applications/:userId/preparation/:jobId` supplies only verified, unexpired, auto-fill
+profile facts allowed for application use, from an explicit category allowlist. It does not return
+high-risk facts, credentials, documents, or facts for closed/already-submitted jobs. The tracker
+shows these locally for review and offers a manual submission record control. It still does not
+fill real websites or submit. The next milestone is a separate reviewed real-site adapter with
+fixtures, safe field mapping and manual final submission—not enabling the existing fake adapter
+against a real site.
+
 ## MyJobScotland review, 26 September 2026
 
 Public sources reviewed:

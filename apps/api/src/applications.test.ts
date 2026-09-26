@@ -188,6 +188,102 @@ async function startPausedApplication(): Promise<{ applicationId: string; attemp
   return { applicationId: started.application.id, attemptId: started.attempt.id };
 }
 
+describe('real application preparation and external submission records', () => {
+  it('records user-reported submission idempotently and blocks new attempts', async () => {
+    const payload = {
+      jobId,
+      providerReference: 'EXAMPLE-123',
+      submittedAt: '2026-09-01T08:35:00+01:00',
+      confirmed: true,
+    };
+    for (let i = 0; i < 2; i++) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/v1/applications/${userId}/external-submission`,
+        headers: auth,
+        payload,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        status: 'submitted',
+        duplicateApplicationBlocked: true,
+      });
+    }
+    const packet = await app.inject({
+      method: 'GET',
+      url: `/v1/applications/${userId}/preparation/${jobId}`,
+      headers: auth,
+    });
+    expect(packet.json()).toMatchObject({
+      status: 'submitted',
+      facts: [],
+      autoSubmitEnabled: false,
+    });
+    await expect(
+      workflow.startAttempt({
+        userId,
+        jobId,
+        matchRunId: null,
+        policyVersion: 'test',
+        targetOrigin: ORIGIN,
+      }),
+    ).rejects.toThrow('already been submitted');
+    expect((await database.db.query('SELECT * FROM external_submissions')).rows).toHaveLength(1);
+    expect(await applicationStores.applications.findByJob(userId, jobId)).toBeNull();
+  });
+  it('requires authentication, confirmation and an owned tracked job', async () => {
+    const payload = {
+      jobId,
+      providerReference: 'EXAMPLE',
+      submittedAt: '2026-09-01T08:35:00Z',
+      confirmed: true,
+    };
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/v1/applications/${userId}/external-submission`,
+          payload,
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/v1/applications/${userId}/external-submission`,
+          headers: auth,
+          payload: { ...payload, confirmed: false },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/v1/applications/${uuidv7()}/external-submission`,
+          headers: auth,
+          payload,
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+  it('prepares without creating attempts or enabling real browser actions', async () => {
+    const packet = await app.inject({
+      method: 'GET',
+      url: `/v1/applications/${userId}/preparation/${jobId}`,
+      headers: auth,
+    });
+    expect(packet.statusCode).toBe(200);
+    expect(packet.json()).toMatchObject({
+      status: 'manual_preparation',
+      browserPrefillEnabled: false,
+      autoSubmitEnabled: false,
+    });
+    expect(await applicationStores.applications.findByJob(userId, jobId)).toBeNull();
+  });
+});
+
 beforeEach(async () => {
   database = await createMigratedTestDatabase();
   userId = uuidv7();
