@@ -85,8 +85,8 @@ it reads clearly.
    them under "Questions that need you".
 3. **Answer one.** Each question says why you are being asked — no verified fact, the fact is out of
    date, the fact is not allowed to be used for applications, the question is sensitive, or the
-   field could not be recognised at all. Answer it, and choose whether that answer is for this
-   application only (the default) or should be saved to your profile.
+   field could not be recognised at all. Answers given on this screen are always scoped to this
+   application only; the screen offers no way to write one back to your profile.
 4. **Leave a sensitive one alone.** The equal-opportunities questions are marked human-only. The
    agent will not answer them, and there is no setting that makes it.
 5. **Read the review.** When nothing is outstanding, open the review. It lists every field, the
@@ -99,6 +99,62 @@ it reads clearly.
    approval: you still get exactly one submission.
 
 ---
+
+## 4a. Doing it through the screens
+
+The screens can display a practice application and let you answer, confirm, approve, reject and
+resume — but nothing in `apps/api` starts or advances one. `ApplicationRunner` is not wired into the
+service. `scripts/phase-2-screen-walkthrough.mjs` supplies that drive, against a throwaway database
+so your real profile, CV and tracker are never opened.
+
+It refuses to run unless `WALKTHROUGH_DATA_DIR` is set to something other than the real
+`./local-data/pglite`, and refuses any `FAKE_ATS_ORIGIN` that is not a loopback address.
+
+PGlite is single-writer, so the agent must be stopped while a stage runs and started again to use
+the screens. Run each stage as:
+
+```bash
+# stop pnpm api first
+WALKTHROUGH_DATA_DIR=./local-data/phase2-screens/pglite \
+  node --env-file=.env scripts/phase-2-screen-walkthrough.mjs <stage>
+```
+
+Then start the agent against the same throwaway database, and open `/applications`:
+
+```bash
+PGLITE_DATA_DIR=./local-data/phase2-screens/pglite \
+ARTIFACT_DATA_DIR=./local-data/phase2-screens/artifacts pnpm api
+```
+
+| Stage       | What it does, and what you do next on the screen                                    |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `seed`      | Creates the throwaway database and stops with the unknown fields open. Answer them. |
+| `advance`   | Carries on, and stops on the step only a person may do.                             |
+| `resume`    | Resumes, once you have completed and confirmed each human-only question.            |
+| `review`    | Builds the review. Read it on the screen and approve it.                            |
+| `stale`     | The form gains a required field, so your approval no longer matches. Re-approve.    |
+| `submit`    | Makes the one practice submission, then proves a second is refused.                 |
+| `status`    | Prints where the application currently is.                                          |
+| `ambiguous` | Switches the fake site to return no confirmation, for a reconciliation run.         |
+
+The `seed` stage prints the synthetic profile ID to paste into the screen. Your admin token comes
+from `.env` as usual — copy it from the file, never into a chat.
+
+On the human-only step the screen shows no answer box. For each one: choose **I will take over**,
+complete the page yourself at the address the `advance` stage prints, then choose **I completed this
+myself**. That confirmation stores no value, so the agent never learns what you entered. It refuses
+before takeover is active, and the run refuses to resume until every one is confirmed.
+
+Do not run `advance` again after resuming. The human-only step is done, and re-planning it would
+simply re-open those questions. The script refuses, and points you at `review`.
+
+When you have finished, delete the throwaway database and restart the agent with your normal
+settings:
+
+```bash
+rm -rf ./local-data/phase2-screens
+pnpm api
+```
 
 ## 5. Things worth trying deliberately
 
@@ -173,16 +229,68 @@ the status table in `CLAUDE.md`.
 
 ```text
 Phase 2 sign-off
-Date:
-Practice application completed end to end:            yes / no
-Unknown field paused and was answered by me:          yes / no
-Sensitive question was never answered by the agent:   yes / no
-Approval was invalidated after I changed an answer:   yes / no
-Exactly one fake confirmation reference was issued:   yes / no
-Ambiguous outcome went to reconciliation, no retry:   yes / no
-Manual takeover and resume worked:                    yes / no
-Test command and count:   pnpm check —        tests
-Notes:
+Date:                      2026-09-26
+Driven by:                 scripts/phase-2-screen-walkthrough.mjs against the throwaway database
+                           ./local-data/phase2-screens, the bundled fake ATS on 127.0.0.1:3311, and
+                           an invented applicant. No real profile, CV, vacancy or employer involved.
+
+Practice application completed end to end:            yes   FAKE-ATS-B45BD416
+Unknown field paused and was answered by me:          yes   favourite_colour and referral_code both
+                                                            paused as unknown_field; answered Blue
+                                                            and None, application-scope only
+Sensitive question was never answered by the agent:   yes   disability, criminal_record, ethnicity
+                                                            all held as human_action; the review
+                                                            records them as "you completed this
+                                                            yourself; the agent never saw it" and
+                                                            carries no preview or hash for them
+Approval was invalidated after a material change:     yes   approved 844f7689ebbea673; the form then
+                                                            gained a required field, the review
+                                                            became c93e8c9ed3fd85c7, and the submit
+                                                            was refused snapshot_changed
+Exactly one fake confirmation reference was issued:   yes   FAKE-ATS-B45BD416; a second submission
+                                                            refused state_not_ready; the fake site
+                                                            recorded submitCount 1
+Ambiguous outcome went to reconciliation, no retry:   yes   evidenced by pnpm walkthrough:phase2
+                                                            step 9: SUBMISSION_UNKNOWN, ledger
+                                                            unknown, refused state_not_ready
+Manual takeover and resume worked:                    yes   but only after the defect below was
+                                                            fixed; see "Defects found"
+Test command and count:   pnpm check — 315 tests passing, 34 files, none skipped
+Migration version:        0005_advert_attachment_criteria.sql
+Commit at sign-off:       f6900ac plus the two commits recorded below
+
+Defects found and fixed during this walkthrough
+  1. No screen or route could start or advance a practice application. ApplicationRunner was never
+     wired into apps/api, and the applications page told the user "a practice run is started from
+     the tracker page" when the tracker had no such control. Closed by adding
+     scripts/phase-2-screen-walkthrough.mjs, which supplies that drive without adding any
+     production route. The page text has been corrected.
+  2. A run that paused on a sensitive or human-only step could never be resumed through the
+     screens. Such questions are opened with responseKind 'human_action'; the answer route refuses
+     those by design, resume() refuses while any question is open, and no route could close one.
+     The screens deadlocked in WAITING_TAKEOVER permanently. Fixed by adding
+     POST /v1/applications/:userId/:applicationId/questions/:questionId/completed and an
+     "I completed this myself" control. It stores no value, requires takeover to be active first,
+     and is idempotent. Covered by 7 new tests at both the workflow and route layers.
+     The automated suite had not caught this because pnpm walkthrough:phase2 writes directly to the
+     store, bypassing the route guard that was missing.
+
+Limits of this sign-off — read before treating Phase 2 as complete
+  - Screens 1 and 2 were observed by the user directly. The remaining stages were driven by the
+    script above rather than watched screen by screen, at the user's instruction. The mechanism is
+    evidenced; the "does it read clearly to a nontechnical user" judgement that section 4 asks for
+    is therefore only partly done.
+  - The steps that only a person may do were completed by a headless browser standing in for the
+    user, not by the user in their own browser. What that proves is that the agent never touches
+    them, which is the safety property. It does not prove the human experience of doing them.
+  - The ambiguous-outcome case was evidenced from the automated walkthrough, not from the screens.
+  - MVP acceptance criterion 14 in the architecture — a prompt-injection corpus cannot alter
+    policy, expose unrelated facts, escape the allowlist or cause submission — has no corpus and no
+    test anywhere in this repository. That criterion is unproven and Phase 2 should not be called
+    an MVP completion gate until it is.
+
+Still no browser automation outside the bundled fake ATS, and no real submission: confirmed
+Approved to begin Phase 3: no
 ```
 
 Phase 3 — a single real, supervised employer adapter — must not be started until this block is

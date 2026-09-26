@@ -56,7 +56,7 @@ The architecture specification is authoritative. If implementation and specifica
 - Browser automation is confined to the bundled fake ATS. No candidate-account access, no real
   employer form, and no submission capability outside that fake target.
 
-`pnpm check` passes 306 tests (the Playwright tests skip themselves on a machine where
+`pnpm check` passes 315 tests (the Playwright tests skip themselves on a machine where
 `pnpm browser:install` has not been run). Re-run it before and after material changes. On this Windows machine, if pnpm stalls while linking dependencies, use `pnpm install --package-import-method=copy`.
 
 `pnpm` itself was absent from this machine on 2026-09-25 and was installed globally with
@@ -139,6 +139,49 @@ their local `.env`.
 
 Do not begin Phase 3 — a single real, supervised employer adapter — without a new explicit
 instruction from the user, and not before both sign-off blocks above are filled in.
+
+### The Phase 2 screen walkthrough, and two defects it exposed (2026-09-26)
+
+Running the Phase 2 walkthrough through the screens rather than through the script found two gaps.
+Both were in the route and page surface, not in the safety machinery, and both are recorded here
+because the automated suite passed throughout and did not catch either.
+
+**1. No screen could start or advance a practice application.** `ApplicationRunner` — the component
+that drives the browser — was never wired into `apps/api`. It is referenced only by its own module,
+`apps/browser-worker/src/journey.test.ts` and `scripts/phase-2-walkthrough.mjs`. There is no HTTP
+route that creates an application, and the tracker page had no control to start one, although the
+applications page told the user that was where to do it. `scripts/phase-2-screen-walkthrough.mjs`
+now supplies that drive against a throwaway database; the misleading page text is corrected. No
+production route was added, deliberately: wiring the runner into the service touches the attempt and
+submit path and deserves its own review.
+
+**2. A run that paused on a human-only step could never be resumed through the screens.** Sensitive
+and human-only fields open questions with `responseKind: 'human_action'`. The answer route refuses
+those by design, `resume()` refuses while any question is open, and no route could close one. The
+result was a permanent stall in `WAITING_TAKEOVER`: the page told the user to take over, complete the
+step and resume, and resume could never succeed.
+
+Fixed by `POST /v1/applications/:userId/:applicationId/questions/:questionId/completed` and an
+"I completed this myself" control. The important properties:
+
+- It accepts and stores **no value**. `answer_ciphertext` stays null, so the agent never learns the
+  CAPTCHA response, the one-time code, the declaration or the sensitive answer. It records only that
+  the person dealt with it.
+- Takeover must already be active, so the sequence stays honest: the agent stops, the person takes
+  over, the person confirms. Confirming early is refused with `takeover_not_active`.
+- The answer route still refuses `human_action` questions outright, so confirmation cannot be used to
+  smuggle a value in.
+- It is idempotent, so a replayed confirmation changes nothing.
+
+Seven tests cover it, at the workflow layer and at the route layer. The route layer is the one that
+mattered: `pnpm walkthrough:phase2` passes either way because it writes directly to the store and
+never exercises the route guard that was missing. When a flow is only proven through a script that
+bypasses the API, the API is not proven.
+
+**Still unproven.** MVP acceptance criterion 14 — a prompt-injection corpus cannot alter policy,
+expose unrelated facts, escape the allowlist or cause a submission — has no corpus and no test in
+this repository. `tests/fixtures/` holds only `shadow-corpus.json`. Phase 2 must not be treated as
+the MVP completion gate until that exists.
 
 ### Criteria that live in a linked document (added 2026-09-25)
 
@@ -244,15 +287,15 @@ Treat phases as gates, not merely labels. Do not begin a later phase until the p
 
 ### Status at this handoff
 
-| Stage                                                     | Status                        | Meaning                                                                                                                                                                                                                    |
-| --------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 0 — architecture and threat model                   | Complete                      | The implementation specification exists and the standalone boundary is established.                                                                                                                                        |
-| Phase 1A — profile, manual discovery, and shadow matching | Complete                      | The encrypted profile/CV workflow and one-URL MyJobScotland shadow check work locally.                                                                                                                                     |
-| Phase 1B — scheduled discovery, tracker, and Discord      | Built, awaiting user sign-off | Code and tests are in place. The user rejected the shortlist-quality review on 2026-09-25 over unread criteria documents; that is now fixed and the review must be redone. A live Discord check is also still outstanding. |
-| Phase 2 — fake ATS browser framework                      | Built, awaiting user sign-off | Fake ATS, isolated worker, action DSL, manifests and submit guard are in place and tested. The user's walkthrough is outstanding.                                                                                          |
-| Phase 3 — one supervised real adapter                     | Not started                   | Approval is required for every real submission.                                                                                                                                                                            |
-| Phase 4 — constrained auto-submit                         | Not started                   | Requires measured quality and explicit opt-in.                                                                                                                                                                             |
-| Phase 5 — read-only application email                     | Not started                   | Reading/classification only; sending remains disabled.                                                                                                                                                                     |
+| Stage                                                     | Status                        | Meaning                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 0 — architecture and threat model                   | Complete                      | The implementation specification exists and the standalone boundary is established.                                                                                                                                                                                                     |
+| Phase 1A — profile, manual discovery, and shadow matching | Complete                      | The encrypted profile/CV workflow and one-URL MyJobScotland shadow check work locally.                                                                                                                                                                                                  |
+| Phase 1B — scheduled discovery, tracker, and Discord      | Built, awaiting user sign-off | Code and tests are in place. The user rejected the shortlist-quality review on 2026-09-25 over unread criteria documents; that is now fixed and the review must be redone. A live Discord check is also still outstanding.                                                              |
+| Phase 2 — fake ATS browser framework                      | Built, partially signed off   | The fake-ATS walkthrough was run on 2026-09-26 and every mechanism held; two UI/route defects were found and fixed. The sign-off block in `docs/runbooks/phase-2-fake-ats.md` records what was and was not observed by the user, and states why this is not yet an MVP completion gate. |
+| Phase 3 — one supervised real adapter                     | Not started                   | Approval is required for every real submission.                                                                                                                                                                                                                                         |
+| Phase 4 — constrained auto-submit                         | Not started                   | Requires measured quality and explicit opt-in.                                                                                                                                                                                                                                          |
+| Phase 5 — read-only application email                     | Not started                   | Reading/classification only; sending remains disabled.                                                                                                                                                                                                                                  |
 
 ### Phase 1B — complete discovery-only operation
 
@@ -378,5 +421,16 @@ pnpm api
 pnpm browser:install   # once per machine, before any practice application
 pnpm fake-ats          # the local practice job site, 127.0.0.1:3311
 ```
+
+The Phase 2 walkthrough through the screens needs a throwaway database, because nothing in
+`apps/api` starts or advances a practice application. See section 4a of
+`docs/runbooks/phase-2-fake-ats.md`:
+
+```text
+WALKTHROUGH_DATA_DIR=./local-data/phase2-screens/pglite   node --env-file=.env scripts/phase-2-screen-walkthrough.mjs seed
+```
+
+It refuses to run against the real `./local-data/pglite`, and refuses a non-loopback fake-ATS
+origin.
 
 The local service uses `.env`, which is intentionally ignored. Ask the user to enter secrets locally; never request that they paste a token, CV, password, or decrypted profile data into a chat.
