@@ -157,14 +157,82 @@ Steps:
 3. Invite the bot with the **bot** and **applications.commands** scopes and permission to send
    messages in that channel only.
 4. Paste the five values into `.env`. Do not paste any of them into a chat, a commit, or a note.
-5. Restart `pnpm api`. Check `GET /health`: `notificationsConfigured` should now be `true`.
+5. Also set `AGENT_USER_ID` to your agent profile ID. Slash commands stay disabled without it,
+   even when all five Discord values are present.
+6. Restart `pnpm api`. Check `GET /health`: `notificationsConfigured` should now be `true`.
+
+Then check the values without starting the service, and without exposing anything:
+
+```text
+pnpm discord:check
+```
+
+It reports which variables are set (never their values), confirms the bot token identifies a bot,
+confirms the channel is reachable and is in a server rather than a direct message, and says whether
+you are currently inside quiet hours. `pnpm discord:check --send` additionally posts one harmless
+test message.
 
 Quiet hours default to 22:00–07:00 Europe/London (`QUIET_HOURS_START` / `QUIET_HOURS_END`). Nothing
 is sent during them; queued messages wait.
 
+### 6a. Register the slash commands
+
+```text
+pnpm discord:register
+```
+
+The command list lives in `scripts/discord-commands.mjs`. Registration is **guild-scoped**: the
+guild is resolved from `DISCORD_CHANNEL_ID`, so the commands exist only in your private server and
+appear immediately. Global commands are deliberately not used — they would be visible in every
+server the application is ever added to. `pnpm discord:register --list` shows what is registered
+and `--clear` removes it all.
+
+Registering commands changes nothing about what the agent can do. The command surface is read and
+workflow-intent only; `/job apply` always refuses, and the application commands reach the local
+fake ATS and nothing else.
+
+### 6b. The interaction endpoint, and why notifications do not need one
+
+These are two separate directions, with very different exposure:
+
+| Direction                    | How it works                                       | Needs inbound access? |
+| ---------------------------- | -------------------------------------------------- | --------------------- |
+| Agent → you (notifications)  | Outbound HTTPS to `discord.com` with the bot token | **No**                |
+| You → agent (slash commands) | Discord POSTs to an Interactions Endpoint URL      | **Yes, public HTTPS** |
+
+Discord's HTTP interactions model, which this implementation uses, requires a publicly reachable
+HTTPS URL that Discord can POST to. It will not call a loopback address, and it verifies the URL by
+sending a signed PING before it will save it. There is no offline or localhost option for this
+model. `POST /v1/discord/interactions` verifies the Ed25519 signature against
+`DISCORD_PUBLIC_KEY` and rejects a timestamp more than five minutes old, so an unsigned or stale
+request is refused — but that check only runs on requests that reach the service, and the service
+binds to `127.0.0.1` only.
+
+So: **step 7 below needs no tunnel at all.** Do it first, on its own. Only steps 8 and 9, which
+exercise commands, need the endpoint.
+
+When you get there, the options, safest first:
+
+1. **A tunnel you start by hand, only while testing, and stop afterwards** (`cloudflared tunnel
+--url http://127.0.0.1:3210`, or ngrok). One ephemeral hostname, alive for minutes, torn down
+   when the checks are done. This is the recommended option.
+2. **A small always-on relay** you own, forwarding only `/v1/discord/interactions`. More moving
+   parts and a permanent public surface; not worth it for a personal agent.
+3. **Deploying the control plane publicly.** Out of scope, and contrary to the loopback-only design.
+
+Whichever you use, while the tunnel is up the whole control plane is reachable, not just the
+interactions path. `PROFILE_ADMIN_TOKEN` is what stands between the tunnel and the profile routes,
+so it must be a strong value before you open one. Treat the tunnel as a supervised, time-boxed
+window: start it, run the checks, stop it, and clear the Interactions Endpoint URL in the portal
+afterwards so a stale hostname is not left configured.
+
+**Do not create a tunnel without deciding this deliberately.** Nothing in the repository opens one.
+
 ---
 
 ## 7. Confirm one live notification
+
+This needs no interaction endpoint and no tunnel: it is outbound only.
 
 1. Make sure the agent is not paused and the clock is outside quiet hours.
 2. Add a vacancy link on `/tracker` that you expect to be shortlisted, or use
@@ -183,8 +251,8 @@ is sent during them; queued messages wait.
 
 You need a second Discord account, or a friend in the same private server.
 
-1. Register the commands for your application and have the other account run `/agent status` in the
-   channel.
+1. Complete step 6a (command registration) and 6b (interaction endpoint), then have the other
+   account run `/agent status` in the channel.
 2. The reply should be, only to them: _"This job agent only takes commands from its owner."_
 3. Confirm nothing changed: run `/agent status` yourself, and check `/tracker` — no status moved and
    no message was sent.
