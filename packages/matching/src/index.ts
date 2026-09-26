@@ -35,6 +35,11 @@ export type DecisionInput = {
    */
   personSpecification?: 'absent' | 'read' | 'unreadable';
   /**
+   * Whether the advert is open to external applicants. This is a standalone gate: no profile
+   * evidence can satisfy being an existing employee, so it never consults the evidence matcher.
+   */
+  internalOnly?: 'open' | 'restricted' | 'unclear';
+  /**
    * False when no mandatory criteria could be established at all. An advert whose requirements sit
    * in a document the agent never read must not look like an advert with nothing to satisfy.
    */
@@ -108,6 +113,8 @@ export function decideMatch(input: DecisionInput, config: AgentConfig): MatchDec
   if (!input.jobOpen) hardRejectReasons.push('job_not_open');
   if (input.duplicateApplication) hardRejectReasons.push('duplicate_application');
   if (input.excluded) hardRejectReasons.push('user_exclusion_rule');
+  if (input.internalOnly === 'restricted')
+    hardRejectReasons.push('restricted_to_internal_candidates');
   if (!input.locationCompatible) hardRejectReasons.push('location_incompatible');
   if (!input.contractCompatible) hardRejectReasons.push('contract_incompatible');
   if (input.workAuthorisationCompatible === false) {
@@ -144,6 +151,12 @@ export function decideMatch(input: DecisionInput, config: AgentConfig): MatchDec
     autoBlockers.push('no_mandatory_criteria_visible');
     explanation.push(
       'No essential requirements could be established from this advert, so none have been checked.',
+    );
+  }
+  if (input.internalOnly === 'unclear') {
+    autoBlockers.push('eligibility_restriction_unclear');
+    explanation.push(
+      'The advert may be restricted to existing employees or a named programme. Check before applying.',
     );
   }
   if (!input.dailyAutoSlotAvailable) autoBlockers.push('daily_cap_reached');
@@ -243,3 +256,5 @@ export function decideMatch(input: DecisionInput, config: AgentConfig): MatchDec
 }
 
 export * from './shadow.js';
+
+export * from './internal-only.js';

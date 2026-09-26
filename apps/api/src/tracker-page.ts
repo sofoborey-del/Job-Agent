@@ -359,9 +359,30 @@ export const trackerPageHtml = String.raw`<!doctype html>
           var detail = results[0];
           var packet = results[1];
           preparation.replaceChildren();
-          var packetStatus = document.createElement('p');
-          packetStatus.textContent = packet.message;
-          preparation.append(packetStatus);
+          var view = packet.preparation || {};
+          var labels = {
+            already_submitted: 'Already submitted',
+            blocked_closed: 'Unavailable: closed',
+            blocked_ineligible: 'Unavailable: not eligible',
+            unavailable: 'Assisted filling unavailable',
+            awaiting_login: 'Sign in on the employer site',
+            preparing: 'Preparing',
+            needs_user_input: 'Needs your answers',
+            ready_for_review: 'Ready for you to review'
+          };
+          var state = document.createElement('p');
+          state.textContent = (labels[view.status] || 'Preparing') + ' — ' + (view.message || packet.message);
+          preparation.append(state);
+          if (view.adapter) {
+            var adapterLine = document.createElement('p');
+            adapterLine.className = 'muted';
+            adapterLine.textContent = 'Reviewed adapter: ' + view.adapter.providerName + ' (' + view.adapter.id + ' ' + view.adapter.version + '). Assisted filling is ' + (view.prefillPermitted ? 'permitted' : 'off') + '; final submission is always yours.';
+            preparation.append(adapterLine);
+          }
+          if (view.status === 'already_submitted' || view.status === 'blocked_closed' || view.status === 'blocked_ineligible') {
+            prepare.textContent = labels[view.status];
+            return;
+          }
           if (packet.status === 'submitted' || packet.status === 'blocked_closed') {
             prepare.textContent = packet.status === 'submitted' ? 'Already submitted' : 'Unavailable';
             return;

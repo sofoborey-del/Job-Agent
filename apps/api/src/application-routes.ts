@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
 import type { ApplicationStores, ApplicationWorkflowService } from '@job-agent/application';
+import { realSiteAdapterForUrl } from '@job-agent/adapters';
 import type { AdapterContract } from '@job-agent/browser-core';
 import type { KnowledgeFact } from '@job-agent/domain';
 import type { ApplicationRunner, RunOutcome } from '@job-agent/orchestrator';
@@ -16,6 +17,7 @@ import type { FieldCipher } from '@job-agent/security';
 import type { TrackingStores } from '@job-agent/tracking';
 
 import { applicationsPageHtml } from './applications-page.js';
+import { preparationView } from './real-site-preparation.js';
 
 export type ApprovedDocument = {
   documentId: string;
@@ -85,11 +87,9 @@ export function registerApplicationRoutes(app: FastifyInstance, runtime: Applica
         return reply.code(400).send({ error: 'invalid_request' });
       if ((await runtime.tracking.tracking.detail(userId.data, jobId.data)) === null)
         return reply.code(404).send({ error: 'unknown_job' });
-      return reply
-        .header('cache-control', 'no-store')
-        .send({
-          submission: await runtime.stores.applications.externalSubmission(userId.data, jobId.data),
-        });
+      return reply.header('cache-control', 'no-store').send({
+        submission: await runtime.stores.applications.externalSubmission(userId.data, jobId.data),
+      });
     },
   );
   const externalSchema = z.object({
@@ -169,12 +169,37 @@ export function registerApplicationRoutes(app: FastifyInstance, runtime: Applica
           f.allowedPurposes.includes('application') &&
           (f.expiresAt === undefined || new Date(f.expiresAt).getTime() > Date.now()),
       );
+      // The reviewed real-site adapter, if one covers this address. It stays at its shipped
+      // execution mode, which is disabled: nothing here switches prefill on.
+      const adapter = realSiteAdapterForUrl(job.canonicalUrl);
+      const attempt = await runtime.stores.applications.findByJob(userId.data, jobId.data);
+      const preparation = preparationView({
+        applyUrl: job.canonicalUrl,
+        lifecycleStatus: job.lifecycleStatus,
+        closesAt: job.closesAt,
+        hardRejectReasons: job.matchRun?.explanation.hardRejectReasons ?? [],
+        externalSubmission: submission,
+        adapter,
+        // No reviewed policy grants prefill on this domain yet; see docs/real-application-pilot.md.
+        sitePolicyPermitsPrefill: false,
+        userAuthenticated: false,
+        attempt:
+          attempt === null
+            ? null
+            : {
+                openQuestions: (await runtime.stores.questions.listOpen(attempt.id)).length,
+                reachedReview:
+                  attempt.state === 'READY_FOR_REVIEW' || attempt.state === 'WAITING_APPROVAL',
+              },
+      });
+
       return reply.header('cache-control', 'no-store').send({
         jobId: jobId.data,
         status:
           submission !== null ? 'submitted' : closed ? 'blocked_closed' : 'manual_preparation',
+        preparation,
         submission,
-        browserPrefillEnabled: false,
+        browserPrefillEnabled: preparation.prefillPermitted,
         autoSubmitEnabled: false,
         facts: usable.map((f) => ({
           key: f.key,

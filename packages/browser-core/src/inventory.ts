@@ -34,6 +34,7 @@ export const fieldIntents = [
   'employment.start_date',
   'employment.end_date',
   'employment.duties',
+  'employment.leaving_reason',
   'education.institution',
   'education.qualification',
   'education.grade',

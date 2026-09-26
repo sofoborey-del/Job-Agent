@@ -7,6 +7,11 @@ import type {
 } from '@job-agent/domain';
 
 import { decideMatch, evaluateSalary } from './index.js';
+import {
+  detectInternalOnlyRestriction,
+  isEligibilityRestrictionSentence,
+  type InternalOnlyDetection,
+} from './internal-only.js';
 
 const stopWords = new Set([
   'about',
@@ -93,6 +98,8 @@ export type ShadowMatchResult = {
     visible: boolean;
     unreadableReason?: string;
   };
+  /** Whether the advert is open to external applicants, and the sentences that decided it. */
+  eligibility: InternalOnlyDetection;
   signals: {
     titleFit: number;
     skillsFit: number;
@@ -231,10 +238,12 @@ export function shadowMatch(
           (sentence) => !advertSentences.includes(sentence),
         )
       : [];
+  // An eligibility restriction is not a requirement evidence can meet, so it never becomes one.
+  const internalOnly = detectInternalOnlyRestriction(job.description, specification?.text);
   const candidateSentences: Array<{ text: string; source: ExtractedRequirement['source'] }> = [
     ...advertSentences.map((text) => ({ text, source: 'advert_text' as const })),
     ...specificationSentences.map((text) => ({ text, source: 'person_specification' as const })),
-  ];
+  ].filter(({ text }) => !isEligibilityRestrictionSentence(text));
 
   const requirements: ExtractedRequirement[] = candidateSentences.map(
     ({ text: requirementText, source }, index) => {
@@ -349,6 +358,7 @@ export function shadowMatch(
       humanOnlyStepPresent: true,
       personSpecification: specificationStatus,
       mandatoryCriteriaVisible: requirements.length > 0,
+      internalOnly: internalOnly.status,
     },
     config,
   );
@@ -364,6 +374,7 @@ export function shadowMatch(
       visible: requirements.length > 0,
       ...(specification?.reason === undefined ? {} : { unreadableReason: specification.reason }),
     },
+    eligibility: internalOnly,
     signals: { titleFit, skillsFit, experienceFit, locationFit, contractFit },
     mode: 'shadow_only',
   };

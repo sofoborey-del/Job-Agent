@@ -55,10 +55,16 @@ The architecture specification is authoritative. If implementation and specifica
   `/applications`.
 - Local routes that start and advance a practice application on the fake ATS, with the browser
   worker spawned per request in its own process and the control-plane secrets withheld from it.
-- Browser automation is confined to the bundled fake ATS. No candidate-account access, no real
+- A separate MyJobScotland/TalentLink real-site adapter with its own contract, validator, field
+  mapping and grounded resolver. It ships with execution disabled and cannot express a submit
+  action at all; it is exercised only against synthetic fixtures.
+- Deterministic detection of adverts restricted to an employer’s existing staff or a named
+  programme, as a hard gate that evidence overlap cannot satisfy.
+- Browser automation against a live site is not enabled; the fake ATS remains the only target the
+  browser worker drives. No candidate-account access, no real
   employer form, and no submission capability outside that fake target.
 
-`pnpm check` passes 334 tests (the Playwright tests skip themselves on a machine where
+`pnpm check` passes 451 tests (the Playwright tests skip themselves on a machine where
 `pnpm browser:install` has not been run). Re-run it before and after material changes. On this Windows machine, if pnpm stalls while linking dependencies, use `pnpm install --package-import-method=copy`.
 
 `pnpm` itself was absent from this machine on 2026-09-25 and was installed globally with
@@ -353,15 +359,15 @@ Treat phases as gates, not merely labels. Do not begin a later phase until the p
 
 ### Status at this handoff
 
-| Stage                                                     | Status                        | Meaning                                                                                                                                                                                                                                                                                 |
-| --------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 0 — architecture and threat model                   | Complete                      | The implementation specification exists and the standalone boundary is established.                                                                                                                                                                                                     |
-| Phase 1A — profile, manual discovery, and shadow matching | Complete                      | The encrypted profile/CV workflow and one-URL MyJobScotland shadow check work locally.                                                                                                                                                                                                  |
-| Phase 1B — scheduled discovery, tracker, and Discord      | Built, awaiting user sign-off | Code and tests are in place. The user rejected the shortlist-quality review on 2026-09-25 over unread criteria documents; that is now fixed and the review must be redone. A live Discord check is also still outstanding.                                                              |
-| Phase 2 — fake ATS browser framework                      | Built, partially signed off   | The fake-ATS walkthrough was run on 2026-09-26 and every mechanism held; two UI/route defects were found and fixed. The sign-off block in `docs/runbooks/phase-2-fake-ats.md` records what was and was not observed by the user, and states why this is not yet an MVP completion gate. |
-| Phase 3 — one supervised real adapter                     | Not started                   | Approval is required for every real submission.                                                                                                                                                                                                                                         |
-| Phase 4 — constrained auto-submit                         | Not started                   | Requires measured quality and explicit opt-in.                                                                                                                                                                                                                                          |
-| Phase 5 — read-only application email                     | Not started                   | Reading/classification only; sending remains disabled.                                                                                                                                                                                                                                  |
+| Stage                                                     | Status                            | Meaning                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 0 — architecture and threat model                   | Complete                          | The implementation specification exists and the standalone boundary is established.                                                                                                                                                                                                     |
+| Phase 1A — profile, manual discovery, and shadow matching | Complete                          | The encrypted profile/CV workflow and one-URL MyJobScotland shadow check work locally.                                                                                                                                                                                                  |
+| Phase 1B — scheduled discovery, tracker, and Discord      | Built, awaiting user sign-off     | Code and tests are in place. The user rejected the shortlist-quality review on 2026-09-25 over unread criteria documents; that is now fixed and the review must be redone. A live Discord check is also still outstanding.                                                              |
+| Phase 2 — fake ATS browser framework                      | Built, partially signed off       | The fake-ATS walkthrough was run on 2026-09-26 and every mechanism held; two UI/route defects were found and fixed. The sign-off block in `docs/runbooks/phase-2-fake-ats.md` records what was and was not observed by the user, and states why this is not yet an MVP completion gate. |
+| Phase 3 — one supervised real adapter                     | Adapter built, execution disabled | The MyJobScotland/TalentLink adapter, validator, mapper and resolver exist and are tested against synthetic fixtures only. Live prefill is off: no reviewed permission for browser automation. See docs/real-application-pilot.md. Approval is required for every real submission.      |
+| Phase 4 — constrained auto-submit                         | Not started                       | Requires measured quality and explicit opt-in.                                                                                                                                                                                                                                          |
+| Phase 5 — read-only application email                     | Not started                       | Reading/classification only; sending remains disabled.                                                                                                                                                                                                                                  |
 
 ### Phase 1B — complete discovery-only operation
 

@@ -4,8 +4,9 @@ The tracker now offers **Prepare application**. It reads the current tracked job
 shows eligibility concerns and uncertain requirements, checks the closing date and advert status,
 and offers **Open application site**. It creates no attempt and makes no submission claim.
 
-Real browser prefill remains unavailable. A supported adapter must be implemented before the
-preparation panel can start a real attempt; the fake-ATS start endpoint must never be used as its
+Real browser prefill remains **disabled**. A separate reviewed real-site adapter now exists and is
+tested against synthetic fixtures, but it ships switched off and the site policy does not permit
+prefill; see "The real-site adapter" below. The fake-ATS start endpoint must never be used as its
 replacement.
 
 ## Preparation and submitted-job protection
@@ -39,6 +40,94 @@ employment and qualification information. The privacy page identifies TalentLink
 upload processing. The disclaimer says applications may redirect to organisation minisites.
 The terms page does not provide usable permission for browser automation in its available text.
 Consequently real automated prefill is not enabled by this review.
+
+## The real-site adapter, 26 September 2026
+
+A MyJobScotland/TalentLink adapter now exists. **Live prefill is disabled**, and the blocker below
+is the reason. Everything described here is exercised against synthetic fixtures only; nothing in
+this repository has connected to a real employer site.
+
+### The blocker, exactly
+
+The site-policy review recorded above found no usable permission for browser automation in
+MyJobScotland's published terms. That has not changed. Concretely:
+
+- The terms and conditions page does not grant, and does not describe, automated interaction with
+  the candidate application flow.
+- The application itself is served by Lumesse TalentLink, whose own terms were not part of that
+  review and are not reachable without an authenticated candidate session.
+- The disclaimer warns that some councils redirect to their own minisite, so the domain a given
+  advert ends on is not fixed and cannot be reviewed in advance as a class.
+
+So `myJobScotlandAdapter()` ships with `executionMode: 'disabled'`, and the preparation route
+passes `sitePolicyPermitsPrefill: false` unconditionally. Two independent gates, either of which
+alone stops execution. Switching prefill on requires a fresh documented permission review plus an
+explicit user decision — it is not a configuration change.
+
+### What was built
+
+`RealSiteAdapter` in `@job-agent/browser-core` is a **separate contract** from `AdapterContract`,
+not an extension of it. The fake contract fixes `allowsSubmit: true` and `isFakeTarget: true`; the
+real one fixes both to `false`. A real target therefore cannot be passed where a fake one is
+expected, and the fake adapter cannot be pointed at a production host. The loopback rule in the
+existing validator and submit guard is untouched.
+
+`validateRealSiteAction` is a separate validator for this path. It refuses `submit` unconditionally
+— at every execution mode, under every policy, on every step — so there is no configuration in
+which this path can send an application. It also fails closed on an unknown step, an unmapped
+field, a human-only step or field, a non-HTTPS or off-allowlist destination, a next-control that is
+not the recorded one, and any action taken before the user confirms they have signed in.
+
+`resolveRealSiteAnswer` grounds answers in the profile's real structure (`identity.legal_name`,
+`employment.history`, `education.history`, `work_authorisation.gb`) rather than the flat synthetic
+keys the fake-ATS resolver uses. It will not:
+
+- fill a role the profile does not hold, including a second or third employment row;
+- attach a reason for leaving to an employer that reason does not name — the join is on the
+  `employer` field recorded inside the reason itself, never on a key guessed from the row;
+- answer right-to-work when any restriction or sponsorship flag is set;
+- write a supporting statement. There is no such fact in the profile and the agent will not compose
+  one, because a supporting statement is an argument about the applicant's suitability.
+
+Equality monitoring, disclosure, disability and declaration questions are human-only both by step
+and by field intent, so a page that moves such a question onto a fillable step is still refused.
+
+### Internal-only eligibility
+
+"Business Support Officer (QA)" was shortlisted despite being restricted to current Jobs and
+Business Glasgow employees and ILM participants. The restriction had been extracted as an ordinary
+requirement sentence, and requirement sentences are scored by evidence overlap, so generic words
+made it look satisfied.
+
+`detectInternalOnlyRestriction` now reads the advert and any criteria document and returns
+`open`, `restricted` or `unclear`. `restricted` is a **hard reject**
+(`restricted_to_internal_candidates`); `unclear` blocks automatic progression. The detected
+sentences are removed from requirement extraction, so they can no longer be scored as met by
+overlap. An advert that says both "open to internal and external" and "internal applicants only"
+is `unclear`, not open. `internal-only.test.ts` pins the original advert, including a profile
+deliberately stuffed with matching words.
+
+### Preparation status
+
+`preparationView` decides what the tracker's Prepare application control shows, in a fixed order so
+a duplicate can never be presented as ready: `already_submitted`, `blocked_closed`,
+`blocked_ineligible`, `unavailable`, `awaiting_login`, `preparing`, `needs_user_input`,
+`ready_for_review`. `prefillPermitted` is true only after every gate passes, and
+`autoSubmitEnabled` is `false` in every state. Today every MyJobScotland job reaches
+`unavailable` with reason `adapter_execution_disabled`.
+
+Customer Service Advisor GLA15975 is recorded in the external-submission ledger, so it resolves to
+`already_submitted` before any other check runs.
+
+### What is not built
+
+- No worker mode executes real-site actions. The validator, mapper and resolver are complete and
+  tested, but nothing drives a browser against a real domain, deliberately.
+- Reinspecting the page after takeover is specified by the adapter's human-only steps but has no
+  execution path yet, for the same reason.
+- `employment.history` holds one role while four leaving reasons are recorded, so even with prefill
+  enabled only the first employment row could be filled from verified facts. The rest would be
+  questions. Adding the missing roles to the profile is a user action, not a code change.
 
 ## Next implementation
 
