@@ -178,10 +178,11 @@ mattered: `pnpm walkthrough:phase2` passes either way because it writes directly
 never exercises the route guard that was missing. When a flow is only proven through a script that
 bypasses the API, the API is not proven.
 
-**Still unproven.** MVP acceptance criterion 14 — a prompt-injection corpus cannot alter policy,
-expose unrelated facts, escape the allowlist or cause a submission — has no corpus and no test in
-this repository. `tests/fixtures/` holds only `shadow-corpus.json`. Phase 2 must not be treated as
-the MVP completion gate until that exists.
+**Prompt-injection regression coverage.** MVP acceptance criterion 14 is covered by
+`tests/fixtures/prompt-injection-corpus.json` and
+`apps/api/src/prompt-injection-corpus.test.ts`. Hostile advert and attached-document strings are
+kept as untrusted data: they cannot change policy, expose a fact not approved for matching, escape
+the reviewed host boundary or satisfy the independent submit guard.
 
 ### Criteria that live in a linked document (added 2026-09-25)
 

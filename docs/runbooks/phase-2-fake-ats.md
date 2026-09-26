@@ -255,7 +255,8 @@ Ambiguous outcome went to reconciliation, no retry:   yes   evidenced by pnpm wa
                                                             unknown, refused state_not_ready
 Manual takeover and resume worked:                    yes   but only after the defect below was
                                                             fixed; see "Defects found"
-Test command and count:   pnpm check — 315 tests passing, 34 files, none skipped
+Test command and count:   pnpm check — 303 tests passed, 15 browser-dependent tests skipped,
+                                        35 files total
 Migration version:        0005_advert_attachment_criteria.sql
 Commit at sign-off:       f6900ac plus the two commits recorded below
 
@@ -284,10 +285,12 @@ Limits of this sign-off — read before treating Phase 2 as complete
     user, not by the user in their own browser. What that proves is that the agent never touches
     them, which is the safety property. It does not prove the human experience of doing them.
   - The ambiguous-outcome case was evidenced from the automated walkthrough, not from the screens.
-  - MVP acceptance criterion 14 in the architecture — a prompt-injection corpus cannot alter
-    policy, expose unrelated facts, escape the allowlist or cause submission — has no corpus and no
-    test anywhere in this repository. That criterion is unproven and Phase 2 should not be called
-    an MVP completion gate until it is.
+  - MVP acceptance criterion 14 is now covered by the hostile advert/document corpus in
+    `tests/fixtures/prompt-injection-corpus.json` and
+    `apps/api/src/prompt-injection-corpus.test.ts`. It proves that untrusted content cannot alter
+    policy, expose a fact not approved for matching, escape the reviewed host boundary or cause a
+    submission. The browser-dependent tests above remain skipped by the ordinary `pnpm check`
+    command and are tracked separately from this deterministic corpus.
 
 Still no browser automation outside the bundled fake ATS, and no real submission: confirmed
 Approved to begin Phase 3: no
