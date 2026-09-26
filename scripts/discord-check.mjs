@@ -10,21 +10,19 @@
 import { discordCall } from './discord-commands.mjs';
 
 const problems = [];
-const expected = [
-  'DISCORD_APPLICATION_ID',
-  'DISCORD_PUBLIC_KEY',
-  'DISCORD_BOT_TOKEN',
-  'DISCORD_ALLOWED_USER_ID',
-  'DISCORD_CHANNEL_ID',
-];
-for (const name of expected) {
+// Outbound delivery needs only the token and the channel. The rest gate slash commands, which
+// cannot work until the interaction endpoint is configured anyway, so they warn rather than block.
+const required = ['DISCORD_BOT_TOKEN', 'DISCORD_CHANNEL_ID'];
+const commandOnly = ['DISCORD_APPLICATION_ID', 'DISCORD_PUBLIC_KEY', 'DISCORD_ALLOWED_USER_ID'];
+for (const name of [...required, ...commandOnly]) {
   const present = (process.env[name] ?? '') !== '';
-  console.log(`${present ? 'set  ' : 'EMPTY'}  ${name}`);
-  if (!present) problems.push(`${name} is empty`);
+  const note = present || required.includes(name) ? '' : '  (slash commands only)';
+  console.log(`${present ? 'set  ' : 'EMPTY'}  ${name}${note}`);
+  if (!present && required.includes(name)) problems.push(`${name} is empty`);
 }
+// Not fatal here: notifications are outbound and do not need it. Slash commands do.
 if ((process.env.AGENT_USER_ID ?? '') === '') {
-  console.log('EMPTY  AGENT_USER_ID  (slash commands stay disabled until this is set)');
-  problems.push('AGENT_USER_ID is empty');
+  console.log('EMPTY  AGENT_USER_ID  (notifications still work; slash commands stay disabled)');
 }
 const publicKey = process.env.DISCORD_PUBLIC_KEY ?? '';
 if (publicKey !== '' && !/^[0-9a-f]{64}$/i.test(publicKey)) {
