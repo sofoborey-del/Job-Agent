@@ -123,8 +123,33 @@ therefore still unsigned, and Phase 1B has **not** passed.
    MyJobScotland adverts added through `/tracker`. Judge the **Criteria seen** column too, and decide
    whether the scoring consequence of reading a criteria document is acceptable.
 2. Local Discord bot setup, then one live notification, a refusal of a different Discord user, and a
-   harmless replayed command.
+   harmless replayed command. **Partly done on 2026-09-26 — see the note below.**
 3. Fill in the sign-off block at the end of that runbook and paste it under the status table below.
+
+### Discord setup, done 2026-09-26
+
+The private application, bot and server exist, all five `DISCORD_*` values are in the user's local
+`.env`, and the four slash commands are registered guild-scoped. The user confirmed a test message
+reached the private channel and that the configured user ID is their own account. No identifier is
+recorded here deliberately: they live in `.env` and nowhere else in the repository.
+
+Application hardening applied: Public Bot off, Guild Install only, install link None, no privileged
+gateway intents, and the bot invited with View Channel + Send Messages (`permissions=3072`) only.
+
+Two scripts were added because the runbook assumed capabilities the repository did not have:
+`pnpm discord:check` (outbound-only verification; `--send` posts one test message) and
+`pnpm discord:register` (guild-scoped registration, guild resolved from `DISCORD_CHANNEL_ID`, so no
+sixth identifier is needed). The command definitions live in `scripts/discord-commands.mjs`.
+
+**What this does not prove.** The test message was a direct Discord API call. It did not exercise
+the outbox, the delivery dedupe key or quiet hours, so runbook section 7 — a real shortlist
+notification and the no-duplicate-on-re-score check — is still outstanding. Sections 8 and 9 are
+also outstanding and cannot be done until an interaction endpoint exists: Discord's HTTP
+interactions model requires a public HTTPS URL and will not call loopback. Runbook section 6b
+records the tunnel options; **no tunnel has been created and the user has not decided.**
+
+`AGENT_USER_ID` is still empty, so onboarding has not been completed. That blocks slash commands,
+the scheduler and the shortlist-quality review, and is the real bottleneck rather than Discord.
 
 **Phase 2 exit gate.** Follow `docs/runbooks/phase-2-fake-ats.md`: run one practice application on
 the fake ATS end to end, rehearse at least the validation-loop and ambiguous-outcome cases, and fill
