@@ -38,7 +38,7 @@ const stopWords = new Set([
 ]);
 
 /** Bumped whenever extraction, scoring or gating behaviour changes. Part of the match idempotency key. */
-export const MATCHER_VERSION = 'shadow-1.2.0';
+export const MATCHER_VERSION = 'shadow-1.3.0';
 
 export type ShadowJob = {
   id: string;
@@ -109,6 +109,13 @@ function tokens(value: string): Set<string> {
       .toLocaleLowerCase('en-GB')
       .replace(/[^a-z0-9+#]+/g, ' ')
       .split(/\s+/)
+      .map((item) => {
+        if (item === 'advisor' || item === 'advisors') return 'adviser';
+        if (item === 'services') return 'service';
+        if (item.endsWith('ies') && item.length > 4) return `${item.slice(0, -3)}y`;
+        if (item.endsWith('s') && !item.endsWith('ss') && item.length > 4) return item.slice(0, -1);
+        return item;
+      })
       .filter((item) => item.length >= 3 && !stopWords.has(item)),
   );
 }
@@ -166,7 +173,20 @@ export function extractMandatoryRequirements(description: string): string[] {
     .split(/\n|(?<=[.!?])\s+/)
     .map((line) => line.trim().replace(/^[•*\-–—]+\s*/, ''))
     .filter((line) => line.length >= 12 && line.length <= 500)
-    .filter((line) => /\b(essential|required|must|need to|needs to|requirement)\b/i.test(line));
+    // Only treat wording that asserts a candidate prerequisite as mandatory. Broadly matching the
+    // words "essential" or "required" also captures boilerplate such as "essential city
+    // services" and "within required timescales", which unfairly depresses otherwise good roles.
+    .filter((line) =>
+      /\b(?:you|applicants?|candidates?)\s+(?:will\s+)?must\b|\bmust\s+(?:have|hold|be|demonstrate|possess|provide|obtain)|\b(?:is|are)\s+(?:an?\s+)?essential\b|\b(?:is|are)\s+required\b|\b(?:qualification|experience|knowledge|skill|licen[cs]e|membership|registration|clearance)\s+(?:is\s+)?(?:essential|required)\b|\bneed(?:s)?\s+to\s+(?:have|hold|be|demonstrate|possess|provide|obtain)\b/i.test(
+        line,
+      ),
+    )
+    .filter(
+      (line) =>
+        !/\b(?:no qualifications? required|disability confident|second-class mail|required (?:timescales?|standards?|training)|key competency requirement|essential and generally preferred)\b/i.test(
+          line,
+        ),
+    );
   return [...new Set(candidates)].slice(0, 25);
 }
 

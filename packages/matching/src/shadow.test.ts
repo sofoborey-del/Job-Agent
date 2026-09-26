@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { KnowledgeFact } from '@job-agent/domain';
 
-import { shadowMatch } from './shadow.js';
+import { extractMandatoryRequirements, shadowMatch } from './shadow.js';
 
 function fact(id: string, key: string, value: unknown): KnowledgeFact<unknown> {
   return {
@@ -32,6 +32,48 @@ const profile = [
 ];
 
 describe('deterministic shadow matching', () => {
+  it('does not turn public-sector boilerplate and headings into candidate prerequisites', () => {
+    const extracted = extractMandatoryRequirements(
+      [
+        'NRS delivers essential city services.',
+        'Work must be completed within required timescales.',
+        'We will send it by second-class mail within three working days.',
+        'As a Disability Confident Employer, we interview applicants who meet the essential criteria.',
+        'Key Competency Requirement',
+        'No qualifications required or preferred.',
+        'Applicants must have customer service experience.',
+      ].join('\n'),
+    );
+
+    expect(extracted).toEqual(['Applicants must have customer service experience.']);
+  });
+
+  it('normalises service/services and adviser/advisor when scoring target roles', () => {
+    const result = shadowMatch(
+      {
+        id: 'job-title-normalisation',
+        title: 'Customer Services Advisor',
+        employer: 'Example Council',
+        location: 'Glasgow',
+        description: 'Applicants must have customer service experience.',
+        salary: {
+          minimumMinor: 2_800_000,
+          currency: 'GBP',
+          basis: 'annual_base',
+          confidence: 0.99,
+          sourceText: '£28,000 per year',
+        },
+        contractType: 'Permanent',
+        employmentTypes: ['FULL_TIME'],
+        workPattern: null,
+        closesAt: null,
+      },
+      profile,
+    );
+
+    expect(result.signals.titleFit).toBe(1);
+  });
+
   it('scores verified evidence but never enables submission', () => {
     const result = shadowMatch(
       {
