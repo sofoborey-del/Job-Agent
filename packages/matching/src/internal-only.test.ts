@@ -61,6 +61,30 @@ describe('detecting an advert that is closed to external applicants', () => {
     expect(detectInternalOnlyRestriction(text).status).toBe('open');
   });
 
+  /**
+   * The real MyJobScotland failure: an advert carried standard diversity boilerplate alongside an
+   * explicit internal-only restriction, and the boilerplate downgraded the restriction to
+   * `unclear`, so the vacancy stayed shortlisted at 55 instead of being rejected.
+   */
+  it('is not talked out of a restriction by equal-opportunities boilerplate', () => {
+    const advert = [
+      'Business Support Officer (QA)',
+      'We welcome applications from everyone and are committed to building a diverse workforce.',
+      'Please note, this opportunity is only open to current employees and ILMs of JBG.',
+      'You will provide administrative support across the service.',
+    ].join(' ');
+    expect(detectInternalOnlyRestriction(advert).status).toBe('restricted');
+  });
+
+  it.each([
+    'We welcome applications from everyone and are committed to building a diverse workforce.',
+    'We are a Disability Confident employer and welcome applications from all backgrounds.',
+    'We are committed to equality of opportunity for all applicants.',
+  ])('does not treat %j as an eligibility statement', (boilerplate) => {
+    const advert = `${boilerplate} Internal applicants only.`;
+    expect(detectInternalOnlyRestriction(advert).status).toBe('restricted');
+  });
+
   it('will not call an advert open when it says both things', () => {
     const detection = detectInternalOnlyRestriction(
       'This vacancy is open to both internal and external applicants. Internal applicants only.',

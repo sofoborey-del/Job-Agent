@@ -43,7 +43,19 @@ const stopWords = new Set([
 ]);
 
 /** Bumped whenever extraction, scoring or gating behaviour changes. Part of the match idempotency key. */
-export const MATCHER_VERSION = 'shadow-1.3.0';
+/**
+ * Bump this whenever matching behaviour changes.
+ *
+ * It is part of the match-run idempotency key, so a decision already recorded for an unchanged
+ * job, profile and configuration is reused rather than recalculated. That is what makes results
+ * reproducible — and it also means a change to the matcher does not reach already-scored jobs
+ * until this string moves. A safety fix that is not accompanied by a bump here silently does not
+ * apply to anything already in the tracker.
+ *
+ * 1.4.0: equal-opportunities boilerplate no longer downgrades an explicit internal-only
+ * restriction, which had left ineligible vacancies shortlisted.
+ */
+export const MATCHER_VERSION = 'shadow-1.4.0';
 
 export type ShadowJob = {
   id: string;

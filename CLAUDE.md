@@ -59,7 +59,8 @@ The architecture specification is authoritative. If implementation and specifica
   mapping and grounded resolver. It ships with execution disabled and cannot express a submit
   action at all; it is exercised only against synthetic fixtures.
 - Deterministic detection of adverts restricted to an employer’s existing staff or a named
-  programme, as a hard gate that evidence overlap cannot satisfy.
+  programme, as a hard gate that evidence overlap cannot satisfy. Equal-opportunities boilerplate
+  does not cancel it; see the 2026-09-28 note in docs/real-application-pilot.md.
 - A reviewed reader for the documented Adzuna search API. Its results are marked as excerpts, so no
   criteria can be established from them, and such leads stay in discovered.
 - A user-supplied official-advert route that completes an excerpt-only lead, gated on the supplied
@@ -72,7 +73,7 @@ The architecture specification is authoritative. If implementation and specifica
   browser worker drives. No candidate-account access, no real
   employer form, and no submission capability outside that fake target.
 
-`pnpm check` passes 513 tests (the Playwright tests skip themselves on a machine where
+`pnpm check` passes 517 tests (the Playwright tests skip themselves on a machine where
 `pnpm browser:install` has not been run). Re-run it before and after material changes. On this Windows machine, if pnpm stalls while linking dependencies, use `pnpm install --package-import-method=copy`.
 
 `pnpm` itself was absent from this machine on 2026-09-25 and was installed globally with

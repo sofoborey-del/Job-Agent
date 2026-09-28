@@ -129,6 +129,77 @@ Customer Service Advisor GLA15975 is recorded in the external-submission ledger,
   enabled only the first employment row could be filled from verified facts. The rest would be
   questions. Adding the missing roles to the profile is a user action, not a code change.
 
+### Supervised pilot attempt on the real tracker, 2026-09-28
+
+Run against the user's real database and profile. No synthetic profile was used and no
+re-onboarding happened. Three defects were found on real data that the test suite had not caught.
+
+**1. Equal-opportunities boilerplate cancelled a genuine eligibility restriction.**
+
+`detectInternalOnlyRestriction` downgraded `restricted` to `unclear` whenever the advert also
+contained an "explicitly open" phrase, and `we welcome applications from everyone` was on that
+list. That sentence is diversity boilerplate and appears on most council adverts. The result: the
+Business Support Officer (QA) advert, which says _"Please note, this opportunity is only open to
+current employees and ILMs of JBG"_, stayed **shortlisted at 55**. The earlier fix had been proven
+only against synthetic text that lacked the boilerplate.
+
+Fixed by removing that pattern; the openness list now contains only phrases that address internal
+versus external eligibility. Four real adverts are now correctly detected as restricted, and no
+false positives appeared across the nine full adverts in the tracker. Two of them had been
+shortlisted:
+
+| Advert                                                       | Was            | Now                                           |
+| ------------------------------------------------------------ | -------------- | --------------------------------------------- |
+| Business Support Officer (QA)                                | shortlisted 55 | rejected, `restricted_to_internal_candidates` |
+| Administrative Officer (Children Residential Admin Services) | shortlisted 53 | rejected, same                                |
+
+**2. A matcher change did not reach already-scored jobs.**
+
+`MATCHER_VERSION` is part of the match-run idempotency key, so a decision recorded for an unchanged
+job, profile and configuration is reused rather than recalculated. That is what makes results
+reproducible, and it also means a safety fix silently does not apply to anything already in the
+tracker until the version moves. The first re-score after fixing defect 1 reported
+`evaluated: 0, reused: 32` and changed nothing.
+
+`MATCHER_VERSION` is now `shadow-1.4.0`, and the constant carries a comment saying that a
+behaviour change must bump it. Re-running then reported `evaluated: 32` and produced the table
+above.
+
+**3. The manual handoff omitted the applicant's name.**
+
+The preparation route's fact allowlist matched `identity.first_name` and `identity.last_name`. A
+real profile stores `identity.legal_name`, so the name was missing from the copy-ready pack
+entirely, along with notice period and earliest start date. The allowlist now covers
+`identity.legal_name` and `eligibility.*`; the pack went from 15 facts to 18. Work authorisation
+and anything sensitive stay excluded deliberately: those are declarations the person makes.
+
+The preparation response now also carries a nine-step `checklist`, which names the human-only steps
+rather than implying them, and the tracker renders it.
+
+### The permission question, answered
+
+`https://www.myjobscotland.gov.uk/robots.txt` reads:
+
+```
+User-agent: *
+Disallow: /api/
+Disallow: /user/register/
+Disallow: /user/password/
+Disallow: /user/login/
+Disallow: /user/logout/
+Disallow: /my-organisations/
+```
+
+Public advert pages are not disallowed, which is consistent with the existing reviewed read policy.
+The **authenticated candidate area and the login flow are explicitly disallowed to all automated
+agents**, and that is precisely where an application is filled in. This is documented evidence
+against automated form interaction, not merely an absence of permission.
+
+Prefill therefore stays disabled, and `myJobScotlandAdapter` keeps `executionMode: 'disabled'`.
+Nothing in this session changed that. What would unblock it is written permission from the
+recruiting council or MyJobScotland, recorded as the policy's evidence, as
+`docs/permission-request-draft.md` sets out — a robots.txt cannot be overridden by inference.
+
 ## Next implementation
 
 1. Observe a specific employer's application flow with the user performing login and authentication.

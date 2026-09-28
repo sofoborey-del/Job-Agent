@@ -33,11 +33,21 @@ const restrictedPatterns: readonly RegExp[] = [
   /\b(ilm|intermediate\s+labour\s+market)\s+(participants?|programme|placement)\b/i,
 ];
 
-/** Phrases that mention internal candidates without closing the vacancy to outsiders. */
+/**
+ * Phrases that say the vacancy is open to people outside the organisation.
+ *
+ * These must address internal versus external eligibility and nothing else. Equal-opportunities
+ * and diversity boilerplate — "we welcome applications from everyone", "committed to a diverse
+ * workforce" — says who the employer encourages to apply, not who is eligible to apply. A real
+ * MyJobScotland advert carried that boilerplate alongside "only open to current employees and ILMs
+ * of JBG"; counting the boilerplate as an openness statement downgraded a genuine restriction from
+ * `restricted` to `unclear`, and the vacancy stayed shortlisted at 55. Nothing that is not about
+ * internal versus external eligibility belongs in this list.
+ */
 const openPatterns: readonly RegExp[] = [
   /\bopen\s+to\s+(both\s+)?internal\s+and\s+external\b/i,
   /\binternal\s+and\s+external\s+(applicants?|candidates?)\s+(are\s+)?welcome/i,
-  /\bwe\s+welcome\s+applications?\s+from\s+everyone\b/i,
+  /\bexternal\s+(applicants?|candidates?)\s+(are\s+)?(also\s+)?welcome/i,
 ];
 
 /** Phrases that raise the question without settling it. */

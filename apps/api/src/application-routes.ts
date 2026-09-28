@@ -158,8 +158,13 @@ export function registerApplicationRoutes(app: FastifyInstance, runtime: Applica
         (job.closesAt !== null && new Date(job.closesAt).getTime() <= Date.now());
       const facts =
         submission !== null || closed ? [] : ((await runtime.drive?.loadFacts(userId.data)) ?? []);
+      // Factual categories a person copies onto an application form. Deliberately excluded:
+      // work authorisation and anything sensitive, because those are declarations the person makes
+      // themselves, and `documents.*` and `preferences.*`, which are not form answers.
+      // `identity.legal_name` is included because that is how a real profile stores a name; the
+      // earlier list matched only first_name/last_name and so omitted the name entirely.
       const safeKeys =
-        /^(identity\.(first_name|last_name)|contact\.(email|phone|address)|employment\.|education\.|skills\.|certifications_licences\.)/;
+        /^(identity\.(legal_name|first_name|last_name)|contact\.(email|phone|address)|eligibility\.|employment\.|education\.|skills\.|certifications_licences\.)/;
       const usable = facts.filter(
         (f) =>
           safeKeys.test(f.key) &&
@@ -193,11 +198,46 @@ export function registerApplicationRoutes(app: FastifyInstance, runtime: Applica
               },
       });
 
+      // What the person does by hand while assisted filling is off. The human-only steps are named
+      // rather than implied, because they are the ones the agent must never do even when it can.
+      const checklist =
+        preparation.status === 'already_submitted' ||
+        preparation.status === 'blocked_closed' ||
+        preparation.status === 'blocked_ineligible'
+          ? []
+          : [
+              { step: 'Open the advert and read the person specification in full.', who: 'you' },
+              { step: 'Sign in or register on the employer site.', who: 'you (never the agent)' },
+              {
+                step: 'Copy the details below into the form, checking each one as you go.',
+                who: 'you',
+              },
+              { step: 'Attach your approved CV.', who: 'you' },
+              {
+                step: 'Write the supporting statement yourself. The agent will not draft claims about your experience.',
+                who: 'you',
+              },
+              {
+                step: 'Answer right-to-work, disclosure, equality monitoring and any declaration yourself.',
+                who: 'you (never the agent)',
+              },
+              { step: 'Complete any CAPTCHA or verification step.', who: 'you (never the agent)' },
+              {
+                step: 'Read the completed form, then submit it yourself.',
+                who: 'you (never the agent)',
+              },
+              {
+                step: 'Come back here and record it as submitted, so the agent never offers it again.',
+                who: 'you',
+              },
+            ];
+
       return reply.header('cache-control', 'no-store').send({
         jobId: jobId.data,
         status:
           submission !== null ? 'submitted' : closed ? 'blocked_closed' : 'manual_preparation',
         preparation,
+        checklist,
         submission,
         browserPrefillEnabled: preparation.prefillPermitted,
         autoSubmitEnabled: false,

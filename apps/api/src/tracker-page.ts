@@ -425,6 +425,18 @@ export const trackerPageHtml = String.raw`<!doctype html>
             prepare.textContent = packet.status === 'submitted' ? 'Already submitted' : 'Unavailable';
             return;
           }
+          if (Array.isArray(packet.checklist) && packet.checklist.length) {
+            var listTitle = document.createElement('p');
+            listTitle.textContent = 'What you do by hand:';
+            var steps = document.createElement('ol');
+            packet.checklist.forEach(function (item) {
+              var li = document.createElement('li');
+              li.textContent = item.step + '  (' + item.who + ')';
+              steps.append(li);
+            });
+            preparation.append(listTitle, steps);
+          }
+
           var profile = document.createElement('details');
           var profileTitle = document.createElement('summary');
           profileTitle.textContent = 'Review your saved application details';
