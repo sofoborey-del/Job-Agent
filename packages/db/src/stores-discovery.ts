@@ -40,7 +40,10 @@ function mapSource(row: SqlRow): SourceRecord {
     id: asText(row.id),
     sourceKey: asText(row.source_key),
     displayName: asText(row.display_name),
-    adapterType: adapterType === 'public_feed' ? 'public_feed' : 'manual_url_list',
+    adapterType:
+      adapterType === 'public_feed' || adapterType === 'public_api'
+        ? adapterType
+        : 'manual_url_list',
     sitePolicyDomain: asText(row.site_policy_domain),
     feedUrl: asNullableText(row.feed_url),
     manualUrls: asStringArray(config.manualUrls),
@@ -207,7 +210,7 @@ export class SqlSourceStore implements SourceStore {
           SET last_error_code = $3,
               consecutive_failures = consecutive_failures + 1,
               circuit_open_until = $5,
-              paused_reason = CASE WHEN $5 IS NULL THEN paused_reason ELSE 'repeated_failures' END,
+              paused_reason = CASE WHEN $5::timestamptz IS NULL THEN paused_reason ELSE 'repeated_failures' END,
               next_run_at = $4,
               updated_at = $2
         WHERE id = $1`,
@@ -516,10 +519,11 @@ export class SqlJobIngestionStore implements JobIngestionStore {
              salary_min_minor, salary_max_minor, salary_currency, salary_basis, salary_confidence,
              salary_source_text, posted_at, closes_at, content_hash, fingerprint, source_key,
              person_spec_status, person_spec_text, person_spec_reason, person_spec_sources_json,
-             version, status, first_seen_at, last_seen_at, created_at, updated_at
+             version, status, first_seen_at, last_seen_at, created_at, updated_at,
+             description_completeness
            ) VALUES (
              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-             $19, $20, $21, $22, $23, $26, $27, $28, $29, 1, $24, $25, $25, $25, $25
+             $19, $20, $21, $22, $23, $26, $27, $28, $29, 1, $24, $25, $25, $25, $25, $30
            )
            RETURNING id, version`,
           [
@@ -552,6 +556,7 @@ export class SqlJobIngestionStore implements JobIngestionStore {
             job.personSpecification.text,
             job.personSpecification.reason,
             JSON.stringify(job.personSpecification.sources),
+            job.descriptionCompleteness ?? 'full',
           ],
         );
         const jobRow = requireRow(created, 'Job could not be saved');
@@ -606,7 +611,7 @@ export class SqlJobIngestionStore implements JobIngestionStore {
            salary_confidence = $15, salary_source_text = $16, posted_at = $17, closes_at = $18,
            content_hash = $19, fingerprint = $20, source_key = COALESCE(source_key, $21),
            person_spec_status = $24, person_spec_text = $25, person_spec_reason = $26,
-           person_spec_sources_json = $27,
+           person_spec_sources_json = $27, description_completeness = $28,
            version = CASE WHEN content_hash = $19 THEN version ELSE version + 1 END,
            status = $22, last_seen_at = $23, updated_at = $23
          WHERE id = $1
@@ -639,6 +644,7 @@ export class SqlJobIngestionStore implements JobIngestionStore {
           job.personSpecification.text,
           job.personSpecification.reason,
           JSON.stringify(job.personSpecification.sources),
+          job.descriptionCompleteness ?? 'full',
         ],
       );
       await insertRequirements(tx, jobId, input.requirements);

@@ -44,6 +44,7 @@ function shadowJobFrom(awaiting: JobAwaitingMatch): ShadowJob {
     employer: job.employer,
     location: job.location,
     description: job.description,
+    descriptionCompleteness: job.descriptionCompleteness ?? 'full',
     salary: job.salary,
     contractType: job.contractType,
     employmentTypes: job.employmentTypes,
@@ -261,7 +262,10 @@ export class JobMatchService {
 
     const automatic = automaticReviewStatusFor(result.decision.action);
     let reviewStatus = entry.reviewStatus;
-    if (mayApplyAutomaticReview(entry.reviewStatus, entry.decidedBy)) {
+    if (
+      entry.job.descriptionCompleteness !== 'snippet' &&
+      mayApplyAutomaticReview(entry.reviewStatus, entry.decidedBy)
+    ) {
       const updated = await stores.tracking.changeReviewStatus({
         userId: this.options.userId,
         jobId: entry.jobId,
@@ -283,7 +287,7 @@ export class JobMatchService {
     ).length;
 
     let notified = false;
-    if (automatic === 'shortlisted') {
+    if (automatic === 'shortlisted' && entry.job.descriptionCompleteness !== 'snippet') {
       notified = await stores.outbox.enqueue(
         {
           eventType: 'JOB_MATCHED',

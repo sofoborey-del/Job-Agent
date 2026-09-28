@@ -6,6 +6,7 @@ import type { DiscoveredJob } from './myjobscotland.js';
 export type NormalisedSalary = DiscoveredJob['salary'];
 
 export type NormalisedJob = {
+  descriptionCompleteness?: 'full' | 'snippet';
   sourceKey: string;
   externalId: string;
   canonicalUrl: string;
@@ -69,6 +70,7 @@ export function normaliseDiscoveredJob(sourceKey: string, job: DiscoveredJob): N
     employer,
     location,
     description,
+    job.descriptionCompleteness ?? 'full',
     job.salary,
     employmentTypes,
     contractType,
@@ -92,6 +94,7 @@ export function normaliseDiscoveredJob(sourceKey: string, job: DiscoveredJob): N
     employer,
     location,
     description,
+    descriptionCompleteness: job.descriptionCompleteness ?? 'full',
     salary: job.salary,
     employmentTypes,
     contractType,

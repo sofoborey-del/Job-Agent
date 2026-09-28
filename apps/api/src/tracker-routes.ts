@@ -46,6 +46,7 @@ export type TrackingRuntime = {
   manualSourceKey: string;
   scheduler?: Pick<DiscoveryScheduler, 'status'>;
   schedulerEnabled?: boolean;
+  adzunaCredentials?: { appId: string; appKey: string };
 };
 
 const listQuerySchema = z.object({
@@ -137,6 +138,9 @@ function discoveryServiceFor(runtime: TrackingRuntime, userId: string): Discover
   return new DiscoveryService({
     stores: runtime.stores,
     userId,
+    ...(runtime.adzunaCredentials === undefined
+      ? {}
+      : { adzunaCredentials: runtime.adzunaCredentials }),
     sitePolicyFor: runtime.sitePolicyFor,
     ...(runtime.fetcher === undefined ? {} : { fetcher: runtime.fetcher }),
     ...(runtime.scanner === undefined ? {} : { scanner: runtime.scanner }),

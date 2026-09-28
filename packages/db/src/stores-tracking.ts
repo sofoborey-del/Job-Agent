@@ -184,7 +184,7 @@ function mapPersonSpecification(row: SqlRow): NormalisedJob['personSpecification
 }
 
 const awaitingColumns = `t.id AS tracking_id, t.review_status, t.decided_by, t.lifecycle_status,
-  j.id AS job_id, j.version AS job_version, j.canonical_url, j.title, j.description,
+  j.id AS job_id, j.version AS job_version, j.canonical_url, j.title, j.description, j.description_completeness,
   j.location_json, j.employment_types, j.contract_type, j.hours, j.work_pattern,
   j.external_id, j.source_key, j.content_hash, j.fingerprint, j.posted_at, j.closes_at,
   j.salary_min_minor, j.salary_max_minor, j.salary_currency, j.salary_basis,
@@ -393,6 +393,8 @@ export class SqlTrackingStore implements TrackingStore {
         employer: asText(row.employer),
         location: asText(asRecord(row.location_json).text),
         description: asText(row.description),
+        descriptionCompleteness:
+          asText(row.description_completeness) === 'snippet' ? 'snippet' : 'full',
         salary,
         employmentTypes: asStringArray(row.employment_types),
         contractType: asNullableText(row.contract_type),

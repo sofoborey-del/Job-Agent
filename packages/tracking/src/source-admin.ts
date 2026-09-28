@@ -1,4 +1,4 @@
-import { detailFetcherForDomain, type SourceDefinition } from '@job-agent/discovery';
+import { apiReaderForDomain, detailFetcherForDomain, type SourceDefinition } from '@job-agent/discovery';
 import { discoveryPermitted, evaluateSitePolicy } from '@job-agent/policy';
 
 import type { SitePolicyLookup } from './discovery-service.js';
@@ -49,7 +49,11 @@ export async function checkSourceMayBeEnabled(
 ): Promise<SourceCheckResult> {
   const warnings: string[] = [];
 
-  if (detailFetcherForDomain(subject.sitePolicyDomain) === null) {
+  const hasReader =
+    subject.adapterType === 'public_api'
+      ? apiReaderForDomain(subject.sitePolicyDomain)
+      : detailFetcherForDomain(subject.sitePolicyDomain) !== null;
+  if (!hasReader) {
     return {
       allowed: false,
       reason: 'no_reviewed_parser',
@@ -94,7 +98,12 @@ export async function checkSourceMayBeEnabled(
     };
   }
 
-  const action = subject.adapterType === 'public_feed' ? 'feed' : 'manual_url';
+  const action =
+    subject.adapterType === 'public_feed'
+      ? 'feed'
+      : subject.adapterType === 'public_api'
+        ? 'official_api'
+        : 'manual_url';
   const permission = discoveryPermitted(policy, action, now);
   if (!permission.allowed) {
     return {

@@ -147,6 +147,10 @@ const scheduler = schedulerEnabled
         userId: agentUserId,
         sitePolicyFor: (domain) => sitePolicyStore.findByDomain(domain),
         scanner: malwareScanner,
+        adzunaCredentials: {
+          appId: process.env.ADZUNA_APP_ID ?? '',
+          appKey: process.env.ADZUNA_APP_KEY ?? '',
+        },
         logger,
       }),
       matching: new JobMatchService({ stores, userId: agentUserId, logger }),
@@ -221,6 +225,10 @@ const app = buildServer({
   applications,
   tracking: {
     stores,
+    adzunaCredentials: {
+      appId: process.env.ADZUNA_APP_ID ?? '',
+      appKey: process.env.ADZUNA_APP_KEY ?? '',
+    },
     sitePolicyFor: (domain) => sitePolicyStore.findByDomain(domain),
     listSitePolicies: () => sitePolicyStore.list(),
     scanner: malwareScanner,

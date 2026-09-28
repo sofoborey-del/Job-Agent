@@ -1,5 +1,6 @@
 import {
   detailFetcherForDomain,
+  fetchAdzunaVacancies,
   fetchJobFeed,
   normaliseDiscoveredJob,
   scheduleIntervalOrMinimum,
@@ -29,6 +30,7 @@ export type DiscoveryServiceOptions = {
   userId: string;
   sitePolicyFor: SitePolicyLookup;
   fetcher?: typeof fetch;
+  adzunaCredentials?: { appId: string; appKey: string };
   /**
    * Supplied to read the criteria document an advert links. Without it no attachment is fetched and
    * discovery behaves exactly as it did before.
@@ -107,12 +109,21 @@ export class DiscoveryService {
 
     const policy = await this.options.sitePolicyFor(source.sitePolicyDomain);
     if (policy === null) return empty('skipped', 'site_policy_missing');
-    const action = source.adapterType === 'public_feed' ? 'feed' : 'manual_url';
+    const action =
+      source.adapterType === 'public_feed'
+        ? 'feed'
+        : source.adapterType === 'public_api'
+          ? 'official_api'
+          : 'manual_url';
     const permission = discoveryPermitted(policy, action, now);
     if (!permission.allowed) return empty('skipped', permission.reason);
+    const credentials = this.options.adzunaCredentials;
+    if (source.adapterType === 'public_api' && (!credentials?.appId || !credentials.appKey))
+      return empty('skipped', 'api_credentials_missing');
 
     const detailFetcher = detailFetcherForDomain(source.sitePolicyDomain);
-    if (detailFetcher === null) return empty('skipped', 'no_reviewed_parser');
+    if (source.adapterType !== 'public_api' && detailFetcher === null)
+      return empty('skipped', 'no_reviewed_parser');
 
     const configVersion = await stores.configuration.current();
     const { run, created } = await stores.discoveryRuns.begin({
@@ -141,20 +152,54 @@ export class DiscoveryService {
     let listingWasComplete = source.adapterType === 'public_feed';
 
     try {
-      const candidates = await this.candidateUrls(source, policy, limiter);
+      const apiVacancies =
+        source.adapterType === 'public_api'
+          ? await (async () => {
+              await this.sleep(limiter.delayFor(Date.now()));
+              limiter.record();
+              return fetchAdzunaVacancies({
+                credentials: credentials ?? { appId: '', appKey: '' },
+                what: 'customer service',
+                where: 'Glasgow',
+                minimumAnnualSalary: 25_000,
+                maxItems: source.maxItemsPerRun,
+                ...(this.options.fetcher === undefined ? {} : { fetcher: this.options.fetcher }),
+              });
+            })()
+          : null;
+      const candidates =
+        apiVacancies?.map((vacancy) => vacancy.canonicalUrl) ??
+        (await this.candidateUrls(source, policy, limiter));
       const urls = candidates.slice(0, source.maxItemsPerRun);
       if (candidates.length > source.maxItemsPerRun) listingWasComplete = false;
 
-      for (const url of urls) {
+      for (const [index, url] of urls.entries()) {
         counts.fetched += 1;
         try {
-          await this.sleep(limiter.delayFor(now.getTime()));
-          limiter.record();
-          const discovered = await detailFetcher(
-            url,
-            this.options.fetcher,
-            this.criteriaOptions(policy, limiter, now),
-          );
+          if (apiVacancies === null) {
+            await this.sleep(limiter.delayFor(Date.now()));
+            limiter.record();
+          }
+          const vacancy = apiVacancies?.[index];
+          const discovered =
+            vacancy === undefined
+              ? await (detailFetcher ?? (() => { throw new Error('No reviewed detail fetcher'); }))(
+                  url,
+                  this.options.fetcher,
+                  this.criteriaOptions(policy, limiter, now),
+                )
+              : {
+                  ...vacancy,
+                  hours: null,
+                  workPattern: null,
+                  closesAt: null,
+                  personSpecification: {
+                    status: 'unreadable' as const,
+                    attempted: [],
+                    reason:
+                      'The API provides only a description excerpt. Review the full employer advert manually.',
+                  },
+                };
           const normalised: NormalisedJob = normaliseDiscoveredJob(source.sourceKey, discovered);
           seenExternalIds.push(normalised.externalId);
           const result = await stores.jobs.ingest({

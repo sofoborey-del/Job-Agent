@@ -10,7 +10,8 @@ const ALLOWED_HOSTS = new Set(['myjobscotland.gov.uk', 'www.myjobscotland.gov.uk
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 export type DiscoveredJob = {
-  source: 'myjobscotland';
+  descriptionCompleteness?: 'full' | 'snippet';
+  source: 'myjobscotland' | 'adzuna';
   externalId: string;
   canonicalUrl: string;
   title: string;
