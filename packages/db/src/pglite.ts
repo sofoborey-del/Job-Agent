@@ -140,6 +140,13 @@ export class PGliteProfileRepository implements ProfileRepository, DocumentRepos
     });
   }
 
+  async deleteFactVersions(userId: string, key: string): Promise<void> {
+    await this.db.transaction(async (transaction) => {
+      await transaction.query('DELETE FROM knowledge_facts WHERE user_id = $1 AND key = $2', [userId, key]);
+      await transaction.query('DELETE FROM knowledge_fact_versions WHERE user_id = $1 AND key = $2', [userId, key]);
+    });
+  }
+
   async nextDocumentVersion(userId: string, type: StoredDocument['type']): Promise<number> {
     const result = await this.db.query<{ next_version: number }>(
       `SELECT COALESCE(MAX(version), 0) + 1 AS next_version

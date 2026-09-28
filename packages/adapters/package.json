@@ -8,6 +8,7 @@
     "default": "./dist/index.js"
   },
   "dependencies": {
-    "@job-agent/browser-core": "workspace:*"
+    "@job-agent/browser-core": "workspace:*",
+    "@job-agent/domain": "workspace:*"
   }
 }

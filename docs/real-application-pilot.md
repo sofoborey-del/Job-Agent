@@ -266,6 +266,97 @@ Nothing in this session changed that. What would unblock it is written permissio
 recruiting council or MyJobScotland, recorded as the policy's evidence, as
 `docs/permission-request-draft.md` sets out — a robots.txt cannot be overridden by inference.
 
+## Permission re-checked, 28 September 2026, and what it would take to lift the block
+
+The user asked what supervised MyJobScotland prefill would require. The published sources were read
+again on 2026-09-28. **Nothing has changed, and prefill stays disabled.**
+
+| Source                                              | Read again 2026-09-28 | Finding                                                                                                                                                                                                 |
+| --------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `https://www.myjobscotland.gov.uk/robots.txt`       | Yes                   | Unchanged. `Disallow: /user/login/`, `/user/register/`, `/user/password/`, `/user/logout/`, `/my-organisations/`, `/api/`. One `User-agent: *` group, no `Allow`, no `Crawl-delay`.                     |
+| `https://www.myjobscotland.gov.uk/terms-conditions` | Yes                   | The Terms & Conditions body is effectively placeholder text. No clause addresses automated access, bots, scripted form completion or software agents. No permission, and nothing to rely on either way. |
+| `https://www.myjobscotland.gov.uk/disclaimer`       | Yes                   | Confirms that "the vast majority" of vacancies redirect the candidate to the council's own minisite to apply, and warns against scraper sites republishing vacancies. No automation clause.             |
+
+So the position is the one recorded in September, restated precisely:
+
+1. **The candidate area is disallowed to automated agents by name.** An application is filled in
+   behind `/user/login/`, which robots.txt disallows for every user agent. That is documented
+   evidence against automated interaction, not a mere absence of permission, and an absence of a
+   prohibition in the terms page cannot override it.
+2. **There is no permission to rely on.** The terms page says nothing on the subject at all, so
+   there is no grant to point at, and inferring one from silence is exactly what this project does
+   not do.
+3. **The domain an application ends on is not fixed.** The disclaimer says most vacancies redirect to
+   a council minisite. A class of unreviewed domains cannot be reviewed in advance, so even a
+   MyJobScotland-wide permission would not cover the page the form is actually on.
+4. **TalentLink's own terms are still unreachable** without an authenticated candidate session, so
+   the system that serves the form has not been reviewed at all.
+
+### What would have to be true before live prefill could be switched on
+
+All of these, in this order. None is a code change.
+
+1. Written permission from the recruiting council or COSLA/MyJobScotland for scripted completion of
+   that council's candidate application, naming the automation and the account. Recorded as the site
+   policy's evidence with an expiry.
+2. The exact application domain confirmed for the specific council, and a site policy reviewed for
+   **that** domain — not for `myjobscotland.gov.uk` as a class.
+3. Lumesse/TalentLink's terms for the candidate area obtained and reviewed, since that is the system
+   being driven.
+4. A `robots.txt` position consistent with the grant, or an explicit statement from the site owner
+   that the grant overrides it for this account.
+5. The user's explicit decision to enable it for that one domain, recorded, with the pilot size agreed
+   in advance.
+
+Only then do the code-side gates come into play, and there are still three of them:
+`myJobScotlandAdapter()` ships `executionMode: 'disabled'`; `sitePolicyPermitsPrefill` is passed
+`false` unconditionally from the preparation route; and `validateRealSiteAction` refuses `submit` at
+every execution mode under every policy, so final submission remains the user's in every case.
+
+`docs/permission-request-draft.md` is the letter. The agent has no outbound message capability and
+the user sends it themselves.
+
+### Delivered instead: a grounded answer pack for one job
+
+Because live prefill is blocked and manual retyping is the actual cost the user is paying, the
+milestone delivered is the manual counterpart of prefill:
+[`runbooks/application-preparation.md`](runbooks/application-preparation.md).
+
+`POST /v1/applications/:userId/preparation/:jobId/answer-pack` returns every question the form asks,
+in form order, each one ready-to-copy, needs-you or yours-only. `/application-prep` renders it with
+per-answer and copy-all controls.
+
+It reads the profile through the **same** gates a real prefill would have to pass —
+`resolveRealSiteAnswer`, `resolveFact` for the `application` purpose, and the human-only intent set —
+and prints only what those gates allow. It is not a relaxation of them: when they refuse, the pack
+refuses, and says why.
+
+What this deliberately does not do:
+
+- It opens no browser, contacts no employer and records no submission. `prefillPerformed` is `false`
+  and there is no route that changes that.
+- It composes nothing. No supporting statement, no date arithmetic, no summarising, no reason for
+  leaving joined to an employer it does not name.
+- It opens no more employment or education rows than the profile records, so a five-box form and a
+  two-role profile yields two answered rows and an explicit instruction for the rest.
+- It answers no human-only question, including right to work, even when the profile records an
+  unconditional right. That is a declaration the person makes.
+- It returns no demographic or reusable answer unless that topic is named on that one request, and
+  never puts one in the copy-all.
+- It produces nothing for a job that is closed, restricted to internal candidates, or already in the
+  external-submission ledger; those refuse with `preparation_blocked` and carry no answers.
+- Its audit record carries counts and topic names only — never an answer, a fact value or a CV.
+
+A **form outline** is a new type, separate from `RealSiteAdapter` on purpose. An adapter names
+approved domains and an execution mode because something may drive it; an outline describes a paper
+trail for a human and carries no permission at all. That is what lets a job on an unreviewed domain
+get a usable pack without an adapter being invented for a domain nobody reviewed. The person is told
+which of the two they are reading.
+
+Pinned by `packages/adapters/src/answer-pack.test.ts` (18 tests, the grounding rules) and
+`apps/api/src/answer-pack-route.test.ts` (13 tests, the same rules through the API, including every
+refusal, the audit record, the demographic opt-in and a hostile advert that instructs the agent).
+
 ## Next implementation
 
 1. Observe a specific employer's application flow with the user performing login and authentication.

@@ -2,8 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
 import type { ApplicationStores, ApplicationWorkflowService } from '@job-agent/application';
-import { realSiteAdapterForUrl } from '@job-agent/adapters';
-import type { AdapterContract } from '@job-agent/browser-core';
+import { applicationFormForUrl, realSiteAdapterForUrl } from '@job-agent/adapters';
+import {
+  buildApplicationAnswerPack,
+  type AdapterContract,
+  type RealSiteApprovedDocument,
+  type ReusableAnswerInput,
+} from '@job-agent/browser-core';
 import type { KnowledgeFact } from '@job-agent/domain';
 import type { ApplicationRunner, RunOutcome } from '@job-agent/orchestrator';
 import type {
@@ -17,6 +22,13 @@ import type { FieldCipher } from '@job-agent/security';
 import type { TrackingStores } from '@job-agent/tracking';
 
 import { applicationsPageHtml } from './applications-page.js';
+import {
+  answerTopicFactKey,
+  answerTopicIsSensitive,
+  answerTopicLabels,
+  answerTopicSchema,
+  storedAnswerSchema,
+} from './answer-vault.js';
 import { preparationView } from './real-site-preparation.js';
 
 export type ApprovedDocument = {
@@ -35,6 +47,11 @@ export type ApplicationDrive = {
   runner: ApplicationRunner;
   loadFacts: (userId: string) => Promise<readonly KnowledgeFact<unknown>[]>;
   loadApprovedDocument: (userId: string) => Promise<ApprovedDocument | null>;
+  /**
+   * The approved CV's name and hash, without its bytes. The preparation pack tells the person which
+   * file to attach and proves it is the one they approved; it must never receive the document.
+   */
+  loadApprovedDocumentReference: (userId: string) => Promise<RealSiteApprovedDocument | null>;
   policyVersion: string;
 };
 
@@ -137,6 +154,152 @@ export function registerApplicationRoutes(app: FastifyInstance, runtime: Applica
           body.data.jobId,
         ),
         duplicateApplicationBlocked: true,
+      });
+    },
+  );
+  const answerPackSchema = z.object({
+    /**
+     * Topics from the reusable-answer vault the person explicitly chose to see on this request.
+     *
+     * Empty by default, and there is no setting that changes that. A demographic answer is only
+     * ever returned because the person ticked it on this screen, for this job, on this request.
+     */
+    includeReusableAnswers: z.array(answerTopicSchema).max(12).default([]),
+  });
+
+  /**
+   * A reviewable, grounded set of answers for one shortlisted job, for the person to copy by hand.
+   *
+   * POST rather than GET because the body carries which reusable answers the person chose, and
+   * because nothing here should be cached or sit in a URL. It creates no attempt, opens no browser,
+   * contacts no employer and records no submission. The real-site gates are consulted, not
+   * bypassed: when they refuse, this route still refuses with them.
+   */
+  app.post<{ Params: { userId: string; jobId: string } }>(
+    '/v1/applications/:userId/preparation/:jobId/answer-pack',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      const jobId = z.uuid().safeParse(request.params.jobId);
+      const body = answerPackSchema.safeParse(request.body ?? {});
+      if (!userId.success || !jobId.success || !body.success)
+        return reply.code(400).send({ error: 'invalid_request' });
+
+      const job = await runtime.tracking.tracking.detail(userId.data, jobId.data);
+      if (job === null) return reply.code(404).send({ error: 'unknown_job' });
+
+      const submission = await runtime.stores.applications.externalSubmission(
+        userId.data,
+        jobId.data,
+      );
+      const attempt = await runtime.stores.applications.findByJob(userId.data, jobId.data);
+      const preparation = preparationView({
+        applyUrl: job.canonicalUrl,
+        lifecycleStatus: job.lifecycleStatus,
+        closesAt: job.closesAt,
+        hardRejectReasons: job.matchRun?.explanation.hardRejectReasons ?? [],
+        externalSubmission: submission,
+        adapter: realSiteAdapterForUrl(job.canonicalUrl),
+        // No reviewed policy grants prefill on any domain; see docs/real-application-pilot.md.
+        sitePolicyPermitsPrefill: false,
+        userAuthenticated: false,
+        attempt:
+          attempt === null
+            ? null
+            : {
+                openQuestions: (await runtime.stores.questions.listOpen(attempt.id)).length,
+                reachedReview:
+                  attempt.state === 'READY_FOR_REVIEW' || attempt.state === 'WAITING_APPROVAL',
+              },
+      });
+
+      // A job already sent, closed or barred to this applicant gets no answers at all. Preparing an
+      // application nobody may send is how a duplicate submission starts.
+      if (
+        preparation.status === 'already_submitted' ||
+        preparation.status === 'blocked_closed' ||
+        preparation.status === 'blocked_ineligible'
+      ) {
+        return reply.code(409).header('cache-control', 'no-store').send({
+          error: 'preparation_blocked',
+          preparation,
+          pack: null,
+          message: preparation.message,
+        });
+      }
+
+      const drive = runtime.drive ?? null;
+      if (drive === null) return reply.code(503).send({ error: 'profile_unavailable' });
+
+      const facts = await drive.loadFacts(userId.data);
+      const approvedDocument = await drive.loadApprovedDocumentReference(userId.data);
+
+      // The vault is stored `never_auto_fill`, so no resolver will ever reach it. Reading it here is
+      // the person asking to see their own saved wording on their own local screen, one topic at a
+      // time, and the pack lists those answers separately rather than filling a question with them.
+      const reusableAnswers: ReusableAnswerInput[] = body.data.includeReusableAnswers.flatMap(
+        (topic) => {
+          const fact = facts.find((candidate) => candidate.key === answerTopicFactKey(topic));
+          if (fact?.status !== 'verified') return [];
+          const stored = storedAnswerSchema.safeParse(fact.value);
+          if (!stored.success || stored.data.topic !== topic) return [];
+          return [
+            {
+              topic,
+              label: answerTopicLabels[topic],
+              answer: stored.data.answer,
+              sensitive: answerTopicIsSensitive(topic),
+            },
+          ];
+        },
+      );
+
+      const { form, template, reviewedForThisSite } = applicationFormForUrl(job.canonicalUrl);
+      const pack = buildApplicationAnswerPack({
+        form,
+        template,
+        facts,
+        approvedDocument,
+        reusableAnswers,
+      });
+
+      await runtime.tracking.audit.append(
+        {
+          userId: userId.data,
+          actorType: 'user',
+          actorId: null,
+          action: 'application.answer_pack_prepared',
+          resourceType: 'job',
+          resourceId: jobId.data,
+          result: 'succeeded',
+          policyVersion: null,
+          correlationId: newCorrelationId(),
+          // Counts and topic names only. No answer, no value and no fact content is recorded.
+          metadata: {
+            formId: form.id,
+            reviewedForThisSite,
+            ready: pack.summary.ready,
+            needsYou: pack.summary.needsYou,
+            humanOnly: pack.summary.humanOnly,
+            reusableTopicsShown: body.data.includeReusableAnswers,
+          },
+        },
+        new Date(),
+      );
+
+      return reply.header('cache-control', 'no-store').send({
+        jobId: jobId.data,
+        jobTitle: job.title,
+        employer: job.employer,
+        closesAt: job.closesAt,
+        preparation,
+        /** True only when a reviewed adapter covers this application address. */
+        reviewedForThisSite,
+        pack,
+        browserPrefillEnabled: false,
+        autoSubmitEnabled: false,
+        message: reviewedForThisSite
+          ? 'Answers grounded in your approved profile, for you to copy. Assisted filling is not enabled for this site, so you complete and send the form yourself.'
+          : 'Answers grounded in your approved profile, shown against a general application outline. Your form may differ, so read it rather than assuming a box is absent.',
       });
     },
   );

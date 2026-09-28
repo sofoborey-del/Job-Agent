@@ -51,8 +51,12 @@ The architecture specification is authoritative. If implementation and specifica
 - Deterministic field mapping, grounded answer resolution, review manifests bound to a hash,
   checkpoints, crash recovery, pause/resume, manual takeover, and a single-use submit guard.
 - Discord `/application` commands for questions, answers, approval, rejection, takeover and resume.
-- Local nontechnical screens at `/onboarding`, `/cv-review`, `/shadow-match`, `/tracker`, and
-  `/applications`.
+- Local nontechnical screens at `/onboarding`, `/cv-review`, `/profile-history`, `/leaving-reasons`,
+  `/answer-vault`, `/shadow-match`, `/tracker`, `/applications`, and `/application-prep`.
+- A per-job grounded answer pack at `/application-prep`, the manual counterpart of prefill: every
+  question the employer's form asks, in form order, each one ready-to-copy, needs-you or yours-only,
+  with the source of every ready answer. It reads the profile through the same gates a real prefill
+  would have to pass and prints only what they allow.
 - Local routes that start and advance a practice application on the fake ATS, with the browser
   worker spawned per request in its own process and the control-plane secrets withheld from it.
 - A separate MyJobScotland/TalentLink real-site adapter with its own contract, validator, field
@@ -73,7 +77,7 @@ The architecture specification is authoritative. If implementation and specifica
   browser worker drives. No candidate-account access, no real
   employer form, and no submission capability outside that fake target.
 
-`pnpm check` passes 528 tests (the Playwright tests skip themselves on a machine where
+`pnpm check` passes 587 tests (the Playwright tests skip themselves on a machine where
 `pnpm browser:install` has not been run). Re-run it before and after material changes. On this Windows machine, if pnpm stalls while linking dependencies, use `pnpm install --package-import-method=copy`.
 
 `pnpm` itself was absent from this machine on 2026-09-25 and was installed globally with
@@ -263,6 +267,91 @@ Those bytes go to the worker and nowhere else: they are never logged and never i
 `apps/api/src/prompt-injection-corpus.test.ts`. Hostile advert and attached-document strings are
 kept as untrusted data: they cannot change policy, expose a fact not approved for matching, escape
 the reviewed host boundary or satisfy the independent submit guard.
+
+### Reasons for leaving had to be linked by hand (added 2026-09-28)
+
+Measured against the user's real profile, not a fixture: 7 employment rows, 4 recorded leaving
+reasons, and **all 7 roles reported "no recorded reason matches that employer"**. So 4 usable facts
+were invisible to the resolver.
+
+The cause is not the join. `resolveRealSiteAnswer` matches a reason to a role on the employer name
+recorded inside the reason, exactly, and that strictness is the safety property: a reason attached to
+an employer it does not name is a false statement on an application form. The cause is that
+employment rows are drafted from CV lines that carry a town or work pattern after the employer, while
+the reasons were recorded against the bare name.
+
+**Do not loosen the join.** Fuzzy or substring matching is precisely how the wrong reason reaches the
+wrong employer. Structural measurement of the real data showed why: of 7 rows, 2 were unambiguous
+whole-word prefixes, 3 had no overlap at all, and 2 shared only 1–3 tokens with a reason — those last
+two are exactly what a fuzzy matcher would get wrong.
+
+`draftLeavingReasonLinks` / `applyLeavingReasonLinks` in `@job-agent/profile`, with
+`GET`/`POST /v1/profile/:userId/leaving-reasons` and the `/leaving-reasons` screen, make it a one-time
+human confirmation instead — the same pattern as history confirmation. It proposes a pairing only
+when the recorded employer is a whole-word prefix of the row's employer **and** that pairing is the
+only possibility in both directions; anything many-to-one, one-to-many or merely word-sharing gets no
+proposal. On the real profile it proposes exactly 2 and leaves 5 alone, which is correct.
+
+Confirming rewrites only the `employer` field, to the exact string the history row carries, keeping
+the original in `employerAsEntered`; facts are versioned so the previous value survives too. The
+reason wording is never touched — the person is saying which employer a reason belongs to, not
+changing what it says. `sourceRevision` binds a confirmation to the history and reasons that were
+shown, so a stale page cannot write.
+
+14 unit tests plus 8 route tests in `server.test.ts`.
+
+### A grounded answer pack for one application (added 2026-09-28)
+
+**Why this and not prefill.** The permission review was redone on 2026-09-28 against the live
+sources; see the new section in docs/real-application-pilot.md. `robots.txt` still disallows
+`/user/login/` and `/user/register/` to every agent, the terms page is effectively placeholder text
+and grants nothing, and the disclaimer confirms most vacancies redirect to an unreviewed council
+minisite. Live prefill therefore stays off. The cost the user is actually paying is retyping, so the
+milestone delivered is the manual counterpart of prefill rather than a weakened version of it.
+
+**What it is.** `POST /v1/applications/:userId/preparation/:jobId/answer-pack` and the
+`/application-prep` screen. `buildApplicationAnswerPack` in `@job-agent/browser-core` is pure and
+deterministic; `packages/adapters/src/application-forms.ts` holds the question set.
+
+It calls `resolveRealSiteAnswer` — the same grounded resolver a real prefill would use — so it
+inherits every gate rather than sidestepping one. Three properties are load-bearing:
+
+1. Every value is verbatim from one verified fact, or is the approved CV's filename. Nothing is
+   composed, summarised, reworded or inferred. A detail the profile does not hold becomes a question.
+2. The number of employment and education rows comes from the profile, not from the form. The
+   builder discovers the count by probing the resolver, so there is no second schema to drift.
+3. A question on a human-only step, or carrying a human-only intent, never gets a value — including
+   right to work, even when the profile records an unconditional right.
+
+**`ApplicationFormOutline` is deliberately not `RealSiteAdapter`.** An adapter names approved domains
+and an execution mode because something may drive it; an outline describes a paper trail for a human
+and carries no permission at all. That is what lets a job on an unreviewed domain get a usable pack
+without an adapter being invented for a domain nobody reviewed, and the person is told which of the
+two they are reading. Do not merge these types.
+
+**Demographic and reusable answers.** The vault is stored `never_auto_fill` / `high_risk`, so no
+resolver can reach it and no gate was relaxed to show it. The route returns a vault answer only for a
+topic named in that one request body, lists it in its own section rather than filling a form question
+with it, and excludes it from `clipboardText` so a copy-all can never carry one. The screen ships
+every topic unticked and has no setting that changes that.
+
+**Refusals.** A job already in the external-submission ledger, closed, expired, a duplicate, or
+`restricted_to_internal_candidates` returns 409 `preparation_blocked` with `pack: null` and no
+answers at all. The audit record carries counts and topic names only — never an answer, a fact value
+or a CV.
+
+`CvProcessingService.approvedDocumentReference` was added so the pack can name the CV without
+`approvedUpload` decrypting it. `approvedUpload` stays the one path that returns bytes.
+
+Route-level tests are the ones that matter here, for the reason recorded above:
+`apps/api/src/answer-pack-route.test.ts` (13) covers the token, the unknown job, the missing profile,
+both refusals, the CV-bytes exclusion, the demographic opt-in, the audit record, the generic-outline
+fallback, and a hostile advert instructing the agent to tick declarations.
+`packages/adapters/src/answer-pack.test.ts` (18) pins the grounding rules themselves.
+
+**Not touched.** No route opens, fills or submits an employer form. `myJobScotlandAdapter()` keeps
+`executionMode: 'disabled'`, the preparation route still passes `sitePolicyPermitsPrefill: false`
+unconditionally, and `validateRealSiteAction` still refuses `submit` at every execution mode.
 
 ### From an incomplete lead to an application-ready job (added 2026-09-28)
 
@@ -607,6 +696,9 @@ pnpm api
 pnpm browser:install   # once per machine, before any practice application
 pnpm fake-ats          # the local practice job site, 127.0.0.1:3311
 ```
+
+Preparing one real application by hand is `docs/runbooks/application-preparation.md`: `/tracker` →
+Prepare application → Open the full answer pack, which opens `/application-prep`.
 
 The Phase 2 walkthrough through the screens needs a throwaway database, because nothing in
 `apps/api` starts or advances a practice application. See section 4a of

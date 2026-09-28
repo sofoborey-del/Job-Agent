@@ -12,6 +12,7 @@ import {
   ProfileService,
 } from '@job-agent/profile';
 import { FieldCipher, StaticEncryptionKeyProvider } from '@job-agent/security';
+import { resolveFact } from '@job-agent/knowledge-base';
 
 import { buildServer } from './server.js';
 
@@ -101,6 +102,320 @@ describe('local onboarding API', () => {
     expect(response.body).toContain('Review your CV extraction');
     expect(response.body).not.toContain(adminToken);
     expect(response.body).not.toContain('localStorage');
+  });
+
+  describe('linking reasons for leaving to roles', () => {
+    /** Invented throughout. Mirrors the real shape: CV rows carry a town the reason does not. */
+    async function seedProfile(): Promise<{ userId: string; headers: Record<string, string> }> {
+      const user = await profileService.createUser();
+      const headers = { authorization: `Bearer ${adminToken}` };
+      await profileService.addConfirmedUserFact({
+        userId: user.userId,
+        key: 'employment.history',
+        value: [
+          {
+            employer: 'First Invented Ltd Glasgow Remote',
+            title: 'Adviser',
+            startDate: 'March 2021',
+            endDate: 'August 2022',
+          },
+          {
+            employer: 'Second Invented Plc',
+            title: 'Assistant',
+            startDate: 'January 2020',
+            endDate: 'February 2021',
+          },
+          {
+            employer: 'Third Invented Ltd',
+            title: 'Clerk',
+            startDate: 'June 2018',
+            endDate: 'December 2019',
+          },
+        ],
+        confirmed: true,
+        sensitivity: 'normal',
+        usePolicy: 'auto_fill',
+        allowedPurposes: ['matching', 'application'],
+      });
+      for (const [key, employer] of [
+        ['employment.leaving_reasons.first', 'First Invented Ltd'],
+        ['employment.leaving_reasons.second', 'Second Invented Plc'],
+      ] as const) {
+        await profileService.addConfirmedUserFact({
+          userId: user.userId,
+          key,
+          value: { employer, reasonForLeaving: `Left ${employer} for an invented reason` },
+          confirmed: true,
+          sensitivity: 'personal',
+          usePolicy: 'auto_fill',
+          allowedPurposes: ['matching', 'application'],
+        });
+      }
+      return { userId: user.userId, headers };
+    }
+
+    type Draft = {
+      sourceRevision: string;
+      rows: Array<{ rowIndex: number; linkedKey: string | null; suggestedKey: string | null }>;
+      reasons: Array<{ key: string }>;
+    };
+
+    async function draftFor(userId: string, headers: Record<string, string>): Promise<Draft> {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/v1/profile/${userId}/leaving-reasons`,
+        headers,
+      });
+      return response.json<Draft>();
+    }
+
+    it('requires the admin token', async () => {
+      const { userId } = await seedProfile();
+      const response = await app.inject({
+        method: 'GET',
+        url: `/v1/profile/${userId}/leaving-reasons`,
+      });
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('refuses before an employment history exists', async () => {
+      const user = await profileService.createUser();
+      const response = await app.inject({
+        method: 'GET',
+        url: `/v1/profile/${user.userId}/leaving-reasons`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({ error: 'employment_history_missing' });
+    });
+
+    it('reports what already joins, what it proposes, and what it will not guess', async () => {
+      const { userId, headers } = await seedProfile();
+      const draft = await draftFor(userId, headers);
+      expect(draft.rows[0]?.suggestedKey).toBe('employment.leaving_reasons.first');
+      expect(draft.rows[0]?.linkedKey).toBeNull();
+      expect(draft.rows[1]?.linkedKey).toBe('employment.leaving_reasons.second');
+      expect(draft.rows[2]?.suggestedKey).toBeNull();
+      expect(draft.rows[2]?.linkedKey).toBeNull();
+    });
+
+    it('re-files a confirmed link for the resolver, keeping the wording and what was typed', async () => {
+      const { userId, headers } = await seedProfile();
+      const draft = await draftFor(userId, headers);
+      const saved = await app.inject({
+        method: 'POST',
+        url: `/v1/profile/${userId}/leaving-reasons`,
+        headers,
+        payload: {
+          sourceRevision: draft.sourceRevision,
+          links: [{ rowIndex: 0, reasonKey: 'employment.leaving_reasons.first' }],
+          confirmed: true,
+        },
+      });
+      expect(saved.statusCode).toBe(200);
+      expect(saved.json()).toMatchObject({ saved: true, updated: 1 });
+
+      const facts = await profileService.listFacts(userId);
+      const reason = facts.find((fact) => fact.key === 'employment.leaving_reasons.first');
+      expect(reason?.value).toMatchObject({
+        employer: 'First Invented Ltd Glasgow Remote',
+        reasonForLeaving: 'Left First Invented Ltd for an invented reason',
+        employerAsEntered: 'First Invented Ltd',
+      });
+
+      const after = await draftFor(userId, headers);
+      expect(after.rows[0]?.linkedKey).toBe('employment.leaving_reasons.first');
+    });
+
+    it('refuses a confirmation written against a profile that has since changed', async () => {
+      const { userId, headers } = await seedProfile();
+      const draft = await draftFor(userId, headers);
+      await profileService.addConfirmedUserFact({
+        userId,
+        key: 'employment.leaving_reasons.third',
+        value: { employer: 'Third Invented Ltd', reasonForLeaving: 'Another invented reason' },
+        confirmed: true,
+        sensitivity: 'personal',
+        usePolicy: 'auto_fill',
+        allowedPurposes: ['matching', 'application'],
+      });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/v1/profile/${userId}/leaving-reasons`,
+        headers,
+        payload: {
+          sourceRevision: draft.sourceRevision,
+          links: [{ rowIndex: 0, reasonKey: 'employment.leaving_reasons.first' }],
+          confirmed: true,
+        },
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({ error: 'profile_changed' });
+    });
+
+    it('refuses one reason against two roles', async () => {
+      const { userId, headers } = await seedProfile();
+      const draft = await draftFor(userId, headers);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/v1/profile/${userId}/leaving-reasons`,
+        headers,
+        payload: {
+          sourceRevision: draft.sourceRevision,
+          links: [
+            { rowIndex: 0, reasonKey: 'employment.leaving_reasons.first' },
+            { rowIndex: 2, reasonKey: 'employment.leaving_reasons.first' },
+          ],
+          confirmed: true,
+        },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({ error: 'reason_linked_twice' });
+    });
+
+    it('will not act without the explicit confirmation flag', async () => {
+      const { userId, headers } = await seedProfile();
+      const draft = await draftFor(userId, headers);
+      const response = await app.inject({
+        method: 'POST',
+        url: `/v1/profile/${userId}/leaving-reasons`,
+        headers,
+        payload: {
+          sourceRevision: draft.sourceRevision,
+          links: [{ rowIndex: 0, reasonKey: 'employment.leaving_reasons.first' }],
+        },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('still saves once several reasons are recorded', async () => {
+      // Regression: the change-detection token was built by concatenating every reason's key and
+      // version. With four or more recorded it overran the field's length limit, so every
+      // confirmation was rejected as invalid and the screen silently saved nothing. The earlier
+      // tests seeded only two reasons and so never reached the limit.
+      const { userId, headers } = await seedProfile();
+      for (const [key, employer] of [
+        ['employment.leaving_reasons.fourth_invented_organisation', 'Fourth Invented Organisation'],
+        ['employment.leaving_reasons.fifth_invented_organisation', 'Fifth Invented Organisation'],
+        ['employment.leaving_reasons.sixth_invented_organisation', 'Sixth Invented Organisation'],
+        ['employment.leaving_reasons.seventh_invented_organisation', 'Seventh Invented Company'],
+      ] as const) {
+        await profileService.addConfirmedUserFact({
+          userId,
+          key,
+          value: { employer, reasonForLeaving: `Left ${employer} for an invented reason` },
+          confirmed: true,
+          sensitivity: 'personal',
+          usePolicy: 'auto_fill',
+          allowedPurposes: ['matching', 'application'],
+        });
+      }
+      const draft = await draftFor(userId, headers);
+      expect(draft.reasons.length).toBe(6);
+      expect(draft.sourceRevision.length).toBeLessThanOrEqual(200);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/v1/profile/${userId}/leaving-reasons`,
+        headers,
+        payload: {
+          sourceRevision: draft.sourceRevision,
+          links: [{ rowIndex: 0, reasonKey: 'employment.leaving_reasons.first' }],
+          confirmed: true,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ saved: true, updated: 1 });
+      expect((await draftFor(userId, headers)).rows[0]?.linkedKey).toBe(
+        'employment.leaving_reasons.first',
+      );
+    });
+
+    it('serves a no-store page that says the agent will not check the link for you', async () => {
+      const response = await app.inject({ method: 'GET', url: '/leaving-reasons' });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.body).toContain('Link your reasons for leaving');
+      expect(response.body).toContain('will not check this for you');
+      expect(response.body).not.toContain(adminToken);
+    });
+  });
+
+  it('serves a no-store application preparation page that promises no filling', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/application-prep?profileId=0199-0000-7000-8000-000000000000&jobId=0199-0000-7000-8000-000000000001',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['content-security-policy']).toContain("default-src 'self'");
+    expect(response.body).toContain('Prepare one application');
+    expect(response.body).toContain('cannot fill a real employer form');
+    // Reusable and demographic answers must start unticked; nothing is checked by default.
+    expect(response.body).not.toContain('checked=');
+    expect(response.body).not.toContain('.checked = true');
+    expect(response.body).not.toContain(adminToken);
+    expect(response.body).not.toContain('localStorage');
+  });
+
+  it('drafts reviewed CV history and saves structured rows only after explicit confirmation', async () => {
+    const user = await profileService.createUser();
+    const headers = { authorization: `Bearer ${adminToken}` };
+    for (const [key, value] of [
+      ['employment.cv_reviewed_text', 'Adviser Jul 2025 – Jun 2026\nExample Firm Remote\n• Supported customers.'],
+      ['education.cv_reviewed_text', 'Certificate — Example College | Completed May 2025'],
+    ] as const) {
+      await profileService.addConfirmedUserFact({
+        userId: user.userId, key, value, confirmed: true, sensitivity: 'normal',
+        usePolicy: 'auto_fill', allowedPurposes: ['matching', 'application'],
+      });
+    }
+    const path = `/v1/profile/${user.userId}`;
+    expect((await app.inject({ method: 'GET', url: `${path}/history-draft` })).statusCode).toBe(401);
+    const draftResponse = await app.inject({ method: 'GET', url: `${path}/history-draft`, headers });
+    expect(draftResponse.statusCode).toBe(200);
+    expect(draftResponse.headers['cache-control']).toBe('no-store');
+    const draft = draftResponse.json<{
+      sourceRevision: string;
+      employment: Array<{ employer: string; title: string; startDate: string | null; endDate: string | null; evidenceSummary: string | null }>;
+      education: Array<{ institution: string; qualification: string; field: string | null; startDate: string | null; endDate: string | null; grade: string | null }>;
+    }>();
+    expect(draft.employment).toHaveLength(1);
+    expect((await profileService.listFacts(user.userId)).find((fact) => fact.key === 'employment.history')).toBeUndefined();
+    const payload = {
+      sourceRevision: draft.sourceRevision,
+      employment: draft.employment.map((entry) => ({ ...entry, employer: 'Example Firm' })),
+      education: draft.education.map(({ institution, qualification, field, startDate, endDate, grade }) => ({ institution, qualification, field, startDate, endDate, grade })),
+      confirmed: true,
+    };
+    expect((await app.inject({ method: 'POST', url: `${path}/history-confirm`, headers, payload: { ...payload, confirmed: false } })).statusCode).toBe(400);
+    const saved = await app.inject({ method: 'POST', url: `${path}/history-confirm`, headers, payload });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({ saved: true, employmentCount: 1, educationCount: 1 });
+    const facts = await profileService.listFacts(user.userId);
+    expect(facts.find((fact) => fact.key === 'employment.history')?.value).toMatchObject([{ employer: 'Example Firm' }]);
+    const replay = await app.inject({ method: 'POST', url: `${path}/history-confirm`, headers, payload });
+    expect(replay.json<{ updated: string[] }>().updated).toEqual([]);
+  });
+
+  it('stores optional sensitive answers locally but never makes them automatic form answers', async () => {
+    const user = await profileService.createUser();
+    const headers = { authorization: `Bearer ${adminToken}` };
+    const url = `/v1/profile/${user.userId}/answer-vault/sexual_orientation`;
+    expect((await app.inject({ method: 'GET', url: `/v1/profile/${user.userId}/answer-vault` })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'PUT', url, headers, payload: { answer: 'Prefer not to say', confirmed: false } })).statusCode).toBe(400);
+    const saved = await app.inject({ method: 'PUT', url, headers, payload: { answer: 'Prefer not to say', confirmed: true } });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.body).not.toContain('Prefer not to say');
+    const fact = (await profileService.listFacts(user.userId)).find((item) => item.key === 'application.answer_vault.sexual_orientation');
+    expect(fact).toMatchObject({ sensitivity: 'high_risk', usePolicy: 'never_auto_fill', allowedPurposes: ['application'] });
+    if (fact === undefined) throw new Error('Saved answer fact was not found');
+    expect(resolveFact(fact, 'application').status).toBe('requires_user');
+    const listed = await app.inject({ method: 'GET', url: `/v1/profile/${user.userId}/answer-vault`, headers });
+    expect(listed.headers['cache-control']).toBe('no-store');
+    expect(listed.json()).toMatchObject({ entries: [{ topic: 'sexual_orientation', answer: 'Prefer not to say', sensitive: true }] });
+    expect((await app.inject({ method: 'DELETE', url, headers })).statusCode).toBe(200);
+    expect((await profileService.listFacts(user.userId)).find((item) => item.key === 'application.answer_vault.sexual_orientation')).toBeUndefined();
   });
 
   it('serves a no-store shadow matching page without embedding secrets', async () => {

@@ -6,6 +6,8 @@ import { v7 as uuidv7 } from 'uuid';
 
 export * from './documents.js';
 export * from './cv-processing.js';
+export * from './cv-history-draft.js';
+export * from './leaving-reason-links.js';
 export * from './defender-scanner.js';
 
 export type StoredKnowledgeFact = Omit<KnowledgeFact<unknown>, 'value'> & {
@@ -18,6 +20,7 @@ export interface ProfileRepository {
   nextVersion(userId: string, key: string): Promise<number>;
   saveFact(fact: StoredKnowledgeFact): Promise<void>;
   listActiveFacts(userId: string): Promise<StoredKnowledgeFact[]>;
+  deleteFactVersions(userId: string, key: string): Promise<void>;
 }
 
 export type AddUserFactInput = {
@@ -112,6 +115,11 @@ export class ProfileService {
       version: stored.version,
     }));
   }
+
+  /** Removes all stored versions of one fact. Callers must restrict which keys may be deleted. */
+  async deleteUserFact(userId: string, key: string): Promise<void> {
+    await this.repository.deleteFactVersions(userId, key);
+  }
 }
 
 export class InMemoryProfileRepository implements ProfileRepository {
@@ -154,5 +162,14 @@ export class InMemoryProfileRepository implements ProfileRepository {
       if (current === undefined || current.version < fact.version) latestByKey.set(fact.key, fact);
     }
     return Promise.resolve([...latestByKey.values()]);
+  }
+
+  deleteFactVersions(userId: string, key: string): Promise<void> {
+    for (let index = this.facts.length - 1; index >= 0; index -= 1) {
+      if (this.facts[index]?.userId === userId && this.facts[index]?.key === key) {
+        this.facts.splice(index, 1);
+      }
+    }
+    return Promise.resolve();
   }
 }

@@ -45,6 +45,9 @@ export const trackerPageHtml = String.raw`<!doctype html>
   <div class="eyebrow">Discovery and shortlist only</div>
   <h1>Your job shortlist</h1>
   <p class="intro">Everything here was found by reading public job adverts and comparing them with facts you approved. Nothing has been applied for, and the agent cannot log in to a jobs site or send anything to an employer.</p>
+  <p><a href="/profile-history">Complete employment and education history from your approved CV</a></p>
+  <p><a href="/answer-vault">Review or add reusable application answers</a></p>
+  <p><a href="/leaving-reasons">Link your recorded reasons for leaving to the right roles</a></p>
 
   <section class="card">
     <div class="row">
@@ -487,6 +490,16 @@ export const trackerPageHtml = String.raw`<!doctype html>
             applicationLink.textContent = 'Open application site';
             preparation.append(applicationLink);
           }
+          var packLink = document.createElement('p');
+          var packAnchor = document.createElement('a');
+          packAnchor.href = '/application-prep?profileId=' + encodeURIComponent(el('profile').value.trim()) + '&jobId=' + encodeURIComponent(job.jobId);
+          packAnchor.textContent = 'Open the full answer pack for this job';
+          packLink.append(packAnchor);
+          var packNote = document.createElement('span');
+          packNote.className = 'muted';
+          packNote.textContent = ' — every question the form asks, with the answers your approved profile can evidence, ready to copy.';
+          packLink.append(packNote);
+          preparation.append(packLink);
           var reminder = document.createElement('p');
           reminder.textContent = 'Check your existing applications on the employer site to avoid applying twice. This preparation does not send an application or record it as submitted.';
           preparation.append(reminder);

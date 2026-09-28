@@ -212,6 +212,8 @@ const applications: ApplicationRuntime = {
     }),
     loadFacts: async (userId) => await profileService.listFacts(userId),
     loadApprovedDocument: async (userId) => await cvProcessingService.approvedUpload(userId),
+    loadApprovedDocumentReference: async (userId) =>
+      await cvProcessingService.approvedDocumentReference(userId),
     policyVersion: 'fake-ats-local-v1',
   },
 };

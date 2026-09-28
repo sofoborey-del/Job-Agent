@@ -688,6 +688,16 @@ describe('starting and advancing a practice application', () => {
           runner: stubRunner(),
           loadFacts: () => Promise.resolve(syntheticFacts),
           loadApprovedDocument: () => Promise.resolve(options?.approvedDocument ?? null),
+          loadApprovedDocumentReference: () =>
+            Promise.resolve(
+              options?.approvedDocument === undefined || options.approvedDocument === null
+                ? null
+                : {
+                    documentId: options.approvedDocument.documentId,
+                    sha256: options.approvedDocument.sha256,
+                    filename: options.approvedDocument.filename,
+                  },
+            ),
           policyVersion: 'test-drive-policy',
         },
       },

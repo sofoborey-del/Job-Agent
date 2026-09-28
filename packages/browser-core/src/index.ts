@@ -2,6 +2,7 @@ export * from './actions.js';
 export * from './adapter.js';
 export * from './real-site.js';
 export * from './real-site-resolver.js';
+export * from './answer-pack.js';
 export * from './inventory.js';
 export * from './validator.js';
 export * from './resolver.js';

@@ -101,6 +101,25 @@ export class CvProcessingService {
   }
 
   /**
+   * The approved CV's identity, without its bytes.
+   *
+   * The preparation screen needs to tell the person which file to attach and prove it is the one
+   * they approved. It must not receive the document itself, so this returns the reference only and
+   * `approvedUpload` stays the single path that decrypts anything.
+   */
+  async approvedDocumentReference(
+    userId: string,
+  ): Promise<{ documentId: string; sha256: string; filename: string } | null> {
+    const document = await this.repository.getLatestDocument(userId, 'cv');
+    if (document?.approved !== true) return null;
+    return {
+      documentId: document.id,
+      sha256: document.sha256,
+      filename: document.mimeType === PDF ? 'cv.pdf' : 'cv.docx',
+    };
+  }
+
+  /**
    * The approved CV, ready to upload to a form. It returns nothing unless the document has been
    * explicitly approved, and it re-checks the hash before handing the bytes out, so an artifact
    * changed underneath the record cannot be uploaded in place of the reviewed one.

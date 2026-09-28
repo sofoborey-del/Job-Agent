@@ -172,6 +172,9 @@ importers:
       '@job-agent/browser-core':
         specifier: workspace:*
         version: link:../browser-core
+      '@job-agent/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/application:
     dependencies:

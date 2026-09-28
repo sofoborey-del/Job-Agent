@@ -157,6 +157,13 @@ export class PostgresProfileRepository implements ProfileRepository, DocumentRep
     }));
   }
 
+  async deleteFactVersions(userId: string, key: string): Promise<void> {
+    await inTransaction(this.pool, async (client) => {
+      await client.query('DELETE FROM knowledge_facts WHERE user_id = $1 AND key = $2', [userId, key]);
+      await client.query('DELETE FROM knowledge_fact_versions WHERE user_id = $1 AND key = $2', [userId, key]);
+    });
+  }
+
   async nextDocumentVersion(userId: string, type: StoredDocument['type']): Promise<number> {
     const result = await this.pool.query<{ next_version: number }>(
       `SELECT COALESCE(MAX(version), 0) + 1 AS next_version

@@ -76,7 +76,7 @@ Phase 1A foundation:
 Browser automation in this milestone runs **only against the bundled fake ATS**. There is no real
 job submission capability, and auto-submit remains disabled.
 
-myjobscotland is currently configured for public discovery and assisted prefill only. Login, reCAPTCHA, consent, declarations, and final submission remain human-controlled, and no portal password is persisted. Automatic submission stays disabled until the portal owner confirms it is permitted.
+MyJobScotland public-advert discovery is available, but real-site prefill and submission are disabled: the permission review was redone on 2026-09-28 and the blocker stands. What you get instead is [`/application-prep`](docs/runbooks/application-preparation.md), a per-job pack of grounded answers to copy into the employer's own form. No portal password is persisted. The local `/profile-history` page lets the applicant confirm structured rows drafted from an already-reviewed CV. The local `/answer-vault` page stores optional reusable answers encrypted in the profile; it does not yet fill them into any employer form. Vault values are excluded from matching and automatic form answers, are never sent to Discord, and can be removed through that page.
 
 ## Requirements
 
@@ -165,6 +165,31 @@ See [`docs/runbooks/phase-2-fake-ats.md`](docs/runbooks/phase-2-fake-ats.md). In
 another, and open `http://127.0.0.1:3210/applications`. The fake site binds to `127.0.0.1:3311` and
 the agent refuses to start if `FAKE_ATS_ORIGIN` is not a loopback address.
 
+## Preparing one application
+
+The agent cannot fill a real employer form, so it prepares one for you to fill.
+
+See [`docs/runbooks/application-preparation.md`](docs/runbooks/application-preparation.md). In
+short: on `/tracker`, choose **Prepare application** on a shortlisted job, then **Open the full
+answer pack**. `/application-prep` shows every question the form asks, in form order, in one of
+three states — ready to copy, you answer this, or yours only — with the source of each ready answer
+and a copy button per answer plus one for the lot.
+
+One-time setup that pays off here: `/profile-history` confirms your employment and education rows,
+and `/leaving-reasons` links each recorded reason for leaving to the role it belongs to. The join
+between a reason and a role is exact by design — a reason must never be attached to an employer it
+does not name — and CV-drafted rows often carry a town or work pattern the reason does not, so that
+one screen turns those boxes from "you answer this" into ready-to-copy. It proposes a pairing only
+where it is unambiguous in both directions, and never alters your wording.
+
+Every value is verbatim from a verified profile fact or is the name of your approved CV. Nothing is
+composed, inferred or reworded, the pack opens exactly as many role and qualification rows as your
+profile records, and a detail the profile does not hold becomes a question rather than a guess.
+Right to work, disclosure, equality monitoring, declarations, consent, login and CAPTCHA are never
+answered for you. Reusable and demographic answers are shown only for the topics you tick on that
+request, and never reach the copy-all. A job that is closed, restricted to internal candidates, or
+already recorded as submitted produces no answers at all.
+
 ## Safety defaults
 
 - Minimum annual base salary: GBP 25,000.
@@ -174,6 +199,11 @@ the agent refuses to start if `FAKE_ATS_ORIGIN` is not a loopback address.
   target, aborts any non-loopback request, imports no cookies or storage state, and copies no
   browser profile.
 - CAPTCHA, one-time codes, assessments, declarations and consent are never answered by the agent.
+- No route can open, fill or submit a real employer form. The per-job answer pack reads the profile
+  through the same gates a real prefill would have to pass and prints what they allow, for you to
+  copy; it contacts no employer and records no submission.
+- A demographic or reusable answer is returned only for a topic named on that one request, is never
+  included in a copy-all, and is never auto-filled anywhere.
 - At most one fake submission can occur per application, and approval is invalidated by any
   material change to the answers or the CV.
 - Unknown mandatory prerequisites and ambiguous salary block automatic progression.
