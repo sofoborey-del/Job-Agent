@@ -1,4 +1,8 @@
-import { apiReaderForDomain, detailFetcherForDomain, type SourceDefinition } from '@job-agent/discovery';
+import {
+  apiReaderForDomain,
+  detailFetcherForDomain,
+  type SourceDefinition,
+} from '@job-agent/discovery';
 import { discoveryPermitted, evaluateSitePolicy } from '@job-agent/policy';
 
 import type { SitePolicyLookup } from './discovery-service.js';

@@ -323,6 +323,7 @@ export const trackerPageHtml = String.raw`<!doctype html>
       if (job.closesAt) pills.append(pill('Closes ' + new Date(job.closesAt).toLocaleDateString('en-GB')));
       if (job.sourceKey) pills.append(pill('Found by ' + job.sourceKey));
       pills.append(pill('First seen ' + new Date(job.firstSeenAt).toLocaleDateString('en-GB')));
+      if (job.descriptionCompleteness === 'snippet') pills.append(pill('Excerpt only', 'warn'));
       left.append(pills);
 
       var score = document.createElement('div');
@@ -344,6 +345,43 @@ export const trackerPageHtml = String.raw`<!doctype html>
       link.textContent = 'Open the original advert';
       actions.append(link);
       card.append(actions);
+
+      if (job.descriptionCompleteness === 'snippet') {
+        var incomplete = document.createElement('div');
+        incomplete.className = 'note';
+        var why = document.createElement('p');
+        why.textContent = 'Only an excerpt of this advert was available, so its requirements were never read. It has not been scored against your profile and cannot start an application. Paste the employer’s own advert address below and the agent will read it — but only if that site has already been reviewed.';
+        incomplete.append(why);
+        var row = document.createElement('div');
+        row.className = 'actions';
+        var input = document.createElement('input');
+        input.type = 'url';
+        input.placeholder = 'https://www.myjobscotland.gov.uk/councils/.../job-title';
+        input.setAttribute('aria-label', 'Official employer advert address');
+        var go = document.createElement('button');
+        go.type = 'button';
+        go.textContent = 'Read the official advert';
+        var said = document.createElement('p');
+        said.className = 'muted';
+        go.addEventListener('click', function () {
+          var value = input.value.trim();
+          if (!value) { said.textContent = 'Paste the advert address first.'; return; }
+          go.disabled = true;
+          said.textContent = 'Checking that address… nothing is fetched unless the site is reviewed.';
+          request('/v1/tracker/:userId/jobs/' + job.jobId + '/official-url', {
+            method: 'POST',
+            body: JSON.stringify({ url: value })
+          }).then(function (result) {
+            said.textContent = result.message || 'Done.';
+            loadJobs();
+          }).catch(function (error) {
+            said.textContent = error.message;
+          }).then(function () { go.disabled = false; });
+        });
+        row.append(input, go);
+        incomplete.append(row, said);
+        card.append(incomplete);
+      }
 
       var prepare = document.createElement('button');
       prepare.type = 'button';

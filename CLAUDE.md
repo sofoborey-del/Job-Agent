@@ -60,15 +60,19 @@ The architecture specification is authoritative. If implementation and specifica
   action at all; it is exercised only against synthetic fixtures.
 - Deterministic detection of adverts restricted to an employer’s existing staff or a named
   programme, as a hard gate that evidence overlap cannot satisfy.
-- A reviewed reader for the documented Adzuna search API, shipped disabled and unable to run without
-  a personal key. Its results are marked as excerpts, so no criteria can be established from them.
+- A reviewed reader for the documented Adzuna search API. Its results are marked as excerpts, so no
+  criteria can be established from them, and such leads stay in discovered.
+- A user-supplied official-advert route that completes an excerpt-only lead, gated on the supplied
+  URL’s own domain having both a reviewed policy and a purpose-built reader, and refusing an
+  unreviewed domain without contacting it. The lead is then retired as a duplicate of the official
+  job so the same vacancy cannot be applied for twice.
 - A draft permission request for MyJobScotland/TalentLink in docs/permission-request-draft.md, which
   the user sends themselves. The agent has no outbound message capability.
 - Browser automation against a live site is not enabled; the fake ATS remains the only target the
   browser worker drives. No candidate-account access, no real
   employer form, and no submission capability outside that fake target.
 
-`pnpm check` passes 486 tests (the Playwright tests skip themselves on a machine where
+`pnpm check` passes 513 tests (the Playwright tests skip themselves on a machine where
 `pnpm browser:install` has not been run). Re-run it before and after material changes. On this Windows machine, if pnpm stalls while linking dependencies, use `pnpm install --package-import-method=copy`.
 
 `pnpm` itself was absent from this machine on 2026-09-25 and was installed globally with
@@ -258,6 +262,53 @@ Those bytes go to the worker and nowhere else: they are never logged and never i
 `apps/api/src/prompt-injection-corpus.test.ts`. Hostile advert and attached-document strings are
 kept as untrusted data: they cannot change policy, expose a fact not approved for matching, escape
 the reviewed host boundary or satisfy the independent submit guard.
+
+### From an incomplete lead to an application-ready job (added 2026-09-28)
+
+Adzuna returns an excerpt and a redirect. Neither is a route to a full advert: the excerpt cannot
+establish criteria, and the redirect points wherever the aggregator chooses. The only safe route is
+the person supplying the employer's own advert address, and the agent reading it **only** when that
+exact domain already has both a reviewed site policy and a purpose-built reader.
+
+**What the tracker shows.** `TrackedJobSummary` now carries `descriptionCompleteness`, so an
+excerpt-only lead is labelled "Excerpt only" in the listing and carries a plain explanation: its
+requirements were never read, it has not been scored, and it cannot start an application. The
+column is in `summaryColumns`; without that it defaulted to `'full'` and every lead would have been
+silently mislabelled as complete.
+
+**`POST /v1/tracker/:userId/jobs/:jobId/official-url`.** `checkOfficialUrl` decides before any
+network request, and refuses:
+
+| Refusal                    | When                                                                 |
+| -------------------------- | -------------------------------------------------------------------- |
+| `not_https`                | Not HTTPS, or not a URL                                              |
+| `url_has_credentials`      | The address embeds a username or password                            |
+| `no_site_policy`           | The domain has never been reviewed — refused without being contacted |
+| `policy_forbids_discovery` | A policy exists but prohibits, has expired, or is disabled           |
+| `no_reviewed_reader`       | A policy exists but no reader was written for that domain            |
+| `lead_already_complete`    | The job already holds the full advert, or was already retired        |
+| `same_as_lead_url`         | The address given is the aggregator link the lead already has        |
+
+Domain matching walks a hostname up to its registrable parent, so a policy for
+`myjobscotland.gov.uk` covers `www.myjobscotland.gov.uk` but never matches from a public suffix,
+and `myjobscotland.gov.uk.phishing.example` is refused. `api.adzuna.com` has a policy but no advert
+reader, so it is refused too — a policy alone is not enough.
+
+**Retiring the lead.** The official advert is ingested as its own job with the full text, and the
+lead is set to lifecycle `duplicate` with `duplicate_of_job_id` pointing at it and a reason of
+`superseded_by_official_advert:<jobId>`. That reuses machinery that already exists:
+`preparationView` refuses a `duplicate`, so the retired lead can no longer start an application and
+the same vacancy cannot be applied for twice. A second submission of the same address is refused
+rather than re-fetching the page.
+
+**What is unchanged.** Adzuna redirects are never followed. No requirement is inferred to fill a
+gap. Login, CAPTCHA and MFA are untouched. `applicationActionsEnabled` stays false on every
+response from this route, and the route scores the official advert but never applies for it.
+
+Route-level tests matter here rather than service-level ones, for the reason recorded above: the
+API is only proven when the API is exercised. `tracker.test.ts` covers the excerpt badge, refusal of
+S1Jobs, Indeed and Totaljobs, the admin-token requirement, the successful read-score-retire path,
+and the repeat submission.
 
 ### A second discovery source: the Adzuna API (added 2026-09-28)
 

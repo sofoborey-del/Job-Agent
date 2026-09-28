@@ -367,6 +367,89 @@ export function registerTrackerRoutes(
     return reply.send(summary);
   });
 
+  const officialUrlSchema = z.object({ url: z.url().startsWith('https://').max(2048) });
+
+  /**
+   * Completes an incomplete lead from the official employer advert the person supplies.
+   *
+   * The address is checked before anything is requested: it must be HTTPS, carry no credentials,
+   * and belong to a domain that already has both a reviewed site policy and a purpose-built reader.
+   * A domain that has not been reviewed is refused without being contacted. The aggregator's own
+   * redirect is never followed to find this address, and no requirement is inferred to fill a gap.
+   */
+  app.post<{ Params: { userId: string; jobId: string } }>(
+    '/v1/tracker/:userId/jobs/:jobId/official-url',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      const jobId = z.uuid().safeParse(request.params.jobId);
+      const body = officialUrlSchema.safeParse(request.body);
+      if (!userId.success || !jobId.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+
+      const correlationId = newCorrelationId();
+      const outcome = await discoveryServiceFor(runtime, userId.data).completeLeadFromOfficialUrl({
+        jobId: jobId.data,
+        url: body.data.url,
+        sourceKey: runtime.manualSourceKey,
+        correlationId,
+      });
+      if (outcome.status === 'refused') {
+        return reply.code(409).header('cache-control', 'no-store').send({
+          status: 'refused',
+          reason: outcome.reason,
+          message: outcome.message,
+          applicationActionsEnabled: false,
+        });
+      }
+
+      // Score the official advert in the same request, so the person sees the real decision.
+      const facts = await profileService.listFacts(userId.data);
+      const missingCategories = findMissingProfileCategories(facts);
+      if (missingCategories.length > 0) {
+        return reply.header('cache-control', 'no-store').send({
+          status: 'completed',
+          officialJobId: outcome.officialJobId,
+          message: outcome.message,
+          applicationActionsEnabled: false,
+          match: { state: 'profile_incomplete', missingCategories },
+        });
+      }
+      const decision = await new JobMatchService({
+        stores: runtime.stores,
+        userId: userId.data,
+      }).matchJob({ jobId: outcome.officialJobId, facts, correlationId });
+      const detail = await runtime.stores.tracking.detail(userId.data, outcome.officialJobId);
+
+      return reply.header('cache-control', 'no-store').send({
+        status: 'completed',
+        officialJobId: outcome.officialJobId,
+        message: outcome.message,
+        applicationActionsEnabled: false,
+        job:
+          detail === null
+            ? null
+            : {
+                jobId: detail.jobId,
+                title: detail.title,
+                employer: detail.employer,
+                canonicalUrl: detail.canonicalUrl,
+                reviewStatus: detail.reviewStatus,
+                score: detail.score,
+                descriptionCompleteness: detail.descriptionCompleteness,
+              },
+        match:
+          decision === null
+            ? { state: 'not_scored' }
+            : {
+                state: 'decided',
+                action: decision.matchRun.action,
+                score: decision.matchRun.score,
+              },
+      });
+    },
+  );
+
   app.post('/v1/discovery/manual-url', async (request, reply) => {
     const parsed = manualUrlSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });

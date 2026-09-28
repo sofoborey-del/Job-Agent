@@ -7,3 +7,4 @@ export * from './discovery-service.js';
 export * from './match-service.js';
 export * from './source-admin.js';
 export * from './readiness.js';
+export * from './lead-completion.js';

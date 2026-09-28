@@ -589,3 +589,172 @@ describe('Discord interactions endpoint', () => {
     );
   });
 });
+
+describe('completing an excerpt-only lead from the official advert', () => {
+  const auth = { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' };
+
+  /** Inserts an Adzuna-style lead: an excerpt, no criteria, left in discovered. */
+  async function seedLead(): Promise<string> {
+    const jobId = uuidv7();
+    const companyId = uuidv7();
+    await database.query(
+      `INSERT INTO companies (id, canonical_name) VALUES ($1, 'Invented Retail Ltd')
+       ON CONFLICT (id) DO NOTHING`,
+      [companyId],
+    );
+    await database.query(
+      `INSERT INTO jobs (
+         id, company_id, canonical_url, title, description, description_completeness,
+         location_json, content_hash, fingerprint, version, status
+       ) VALUES ($1, $2, $3, 'Customer Service Adviser',
+         'Handle customer enquiries for a busy team. You will need experience of…', 'snippet',
+         '{"text":"Glasgow"}'::jsonb, $4, $5, 1, 'open')`,
+      [
+        jobId,
+        companyId,
+        `https://www.adzuna.co.uk/jobs/land/ad/${jobId}`,
+        'e'.repeat(64),
+        'f'.repeat(64),
+      ],
+    );
+    await database.query(
+      `INSERT INTO job_tracking (
+         id, user_id, job_id, lifecycle_status, review_status, decided_by, needs_rematch
+       ) VALUES ($1, $2, $3, 'open', 'discovered', 'system', true)`,
+      [uuidv7(), userId, jobId],
+    );
+    return jobId;
+  }
+
+  it('shows the lead as an excerpt in the tracker listing', async () => {
+    const jobId = await seedLead();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/tracker/${userId}/jobs`,
+      headers: auth,
+    });
+    const body = response.json<{
+      jobs: Array<{ jobId: string; descriptionCompleteness: string; reviewStatus: string }>;
+    }>();
+    const lead = body.jobs.find((job) => job.jobId === jobId);
+    expect(lead?.descriptionCompleteness).toBe('snippet');
+    expect(lead?.reviewStatus).toBe('discovered');
+  });
+
+  /** The guarantee that matters: an unreviewed site is refused, and nothing is fetched. */
+  it.each([
+    'https://www.s1jobs.com/job/customer-adviser-999',
+    'https://www.indeed.co.uk/viewjob?jk=abc',
+    'https://www.totaljobs.com/job/12345',
+  ])('refuses %s and fetches nothing', async (url) => {
+    const jobId = await seedLead();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/tracker/${userId}/jobs/${jobId}/official-url`,
+      headers: auth,
+      payload: { url },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ reason: string }>().reason).toBe('no_site_policy');
+  });
+
+  it.each([
+    'http://www.myjobscotland.gov.uk/job/1',
+    'https://user:secret@www.myjobscotland.gov.uk/job/1',
+  ])('refuses %s at the request boundary', async (url) => {
+    const jobId = await seedLead();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/tracker/${userId}/jobs/${jobId}/official-url`,
+      headers: auth,
+      payload: { url },
+    });
+    expect([400, 409]).toContain(response.statusCode);
+  });
+
+  it('requires the admin token', async () => {
+    const jobId = await seedLead();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/tracker/${userId}/jobs/${jobId}/official-url`,
+      headers: { 'content-type': 'application/json' },
+      payload: { url: vacancyUrl },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('refuses a job that already holds the full advert', async () => {
+    await seedCompleteProfile();
+    const added = await app.inject({
+      method: 'POST',
+      url: '/v1/discovery/manual-url',
+      headers: auth,
+      payload: { userId, url: vacancyUrl },
+    });
+    const jobId = added.json<{ jobId: string }>().jobId;
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/tracker/${userId}/jobs/${jobId}/official-url`,
+      headers: auth,
+      payload: { url: vacancyUrl },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ reason: string }>().reason).toBe('lead_already_complete');
+  });
+
+  it('reads the reviewed advert, scores it and retires the lead', async () => {
+    await seedCompleteProfile();
+    const jobId = await seedLead();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/tracker/${userId}/jobs/${jobId}/official-url`,
+      headers: auth,
+      payload: { url: vacancyUrl },
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{
+      status: string;
+      officialJobId: string;
+      job: { descriptionCompleteness: string; title: string };
+      match: { state: string };
+      applicationActionsEnabled: boolean;
+    }>();
+    expect(body.status).toBe('completed');
+    expect(body.applicationActionsEnabled).toBe(false);
+    expect(body.job.descriptionCompleteness).toBe('full');
+    expect(body.match.state).toBe('decided');
+    expect(body.officialJobId).not.toBe(jobId);
+
+    // The lead is retired against the official job, so the same vacancy cannot be applied for twice.
+    const lead = await app.inject({
+      method: 'GET',
+      url: `/v1/tracker/${userId}/jobs/${jobId}`,
+      headers: auth,
+    });
+    const leadBody = lead.json<{ lifecycleStatus: string; duplicateOfJobId: string | null }>();
+    expect(leadBody.lifecycleStatus).toBe('duplicate');
+    expect(leadBody.duplicateOfJobId).toBe(body.officialJobId);
+  });
+
+  it('is harmless when the same official advert is supplied twice', async () => {
+    await seedCompleteProfile();
+    const jobId = await seedLead();
+    const payload = { url: vacancyUrl };
+    const first = await app.inject({
+      method: 'POST',
+      url: `/v1/tracker/${userId}/jobs/${jobId}/official-url`,
+      headers: auth,
+      payload,
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: `/v1/tracker/${userId}/jobs/${jobId}/official-url`,
+      headers: auth,
+      payload,
+    });
+    expect(first.statusCode).toBe(200);
+    // The lead is no longer an excerpt-bearing lead, so a repeat is refused rather than repeated.
+    expect(second.statusCode).toBe(409);
+  });
+});

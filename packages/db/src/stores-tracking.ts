@@ -90,7 +90,8 @@ const summaryColumns = `t.id AS tracking_id, t.user_id, t.job_id, t.lifecycle_st
   t.decided_by, t.status_reason, t.duplicate_of_job_id, t.last_match_run_id, t.score, t.salary_gate,
   t.needs_rematch, t.first_seen_at, t.last_seen_at, t.status_changed_at, t.version,
   j.title, j.canonical_url, j.location_json, j.source_key, j.salary_min_minor, j.salary_max_minor,
-  j.salary_basis, j.posted_at, j.closes_at, j.version AS job_version, c.canonical_name AS employer`;
+  j.salary_basis, j.posted_at, j.closes_at, j.version AS job_version, j.description_completeness,
+  c.canonical_name AS employer`;
 
 function mapSummary(row: SqlRow): TrackedJobSummary {
   const location = asRecord(row.location_json);
@@ -115,6 +116,9 @@ function mapSummary(row: SqlRow): TrackedJobSummary {
     firstSeenAt: iso(row.first_seen_at, new Date().toISOString()),
     lastSeenAt: iso(row.last_seen_at, new Date().toISOString()),
     jobVersion: asNumber(row.job_version, 1),
+    descriptionCompleteness:
+      asText(row.description_completeness) === 'snippet' ? 'snippet' : 'full',
+    duplicateOfJobId: asNullableText(row.duplicate_of_job_id),
   };
 }
 

@@ -11,6 +11,7 @@ import type { MalwareScanner } from '@job-agent/document-safety';
 import { newCorrelationId, silentLogger, type StructuredLogger } from '@job-agent/observability';
 import { discoveryPermitted, PolicyRateLimiter, type SitePolicy } from '@job-agent/policy';
 
+import { checkOfficialUrl, type LeadCompletionRefusal } from './lead-completion.js';
 import { extractJobRequirements } from './requirements.js';
 import type { TrackingStores } from './ports.js';
 import {
@@ -183,11 +184,12 @@ export class DiscoveryService {
           const vacancy = apiVacancies?.[index];
           const discovered =
             vacancy === undefined
-              ? await (detailFetcher ?? (() => { throw new Error('No reviewed detail fetcher'); }))(
-                  url,
-                  this.options.fetcher,
-                  this.criteriaOptions(policy, limiter, now),
-                )
+              ? await (
+                  detailFetcher ??
+                  (() => {
+                    throw new Error('No reviewed detail fetcher');
+                  })
+                )(url, this.options.fetcher, this.criteriaOptions(policy, limiter, now))
               : {
                   ...vacancy,
                   hours: null,
@@ -449,6 +451,171 @@ export class DiscoveryService {
    * Criteria-reading options, or undefined when nothing should be fetched. Each attachment request
    * goes through the same reviewed rate limiter as a page request.
    */
+  /**
+   * Reads the official employer advert the person supplied for an incomplete lead, then links the
+   * lead to it so the same vacancy cannot be applied for twice.
+   *
+   * Nothing is fetched unless the address passed `checkOfficialUrl`, which requires a reviewed
+   * policy and a purpose-built reader for that exact domain. The aggregator's own redirect is never
+   * followed, and no requirement is ever inferred to fill a gap: the advert is read or it is not.
+   */
+  async completeLeadFromOfficialUrl(input: {
+    jobId: string;
+    url: string;
+    sourceKey: string;
+    correlationId?: string;
+    now?: Date;
+  }): Promise<
+    | { status: 'refused'; reason: LeadCompletionRefusal; message: string; officialJobId: null }
+    | { status: 'completed'; reason: null; message: string; officialJobId: string }
+  > {
+    const now = input.now ?? new Date();
+    const correlationId = input.correlationId ?? newCorrelationId();
+    const { stores } = this.options;
+
+    const lead = await stores.tracking.detail(this.options.userId, input.jobId);
+    if (lead === null) {
+      return {
+        status: 'refused',
+        reason: 'lead_not_found',
+        message: 'That job is not on your tracker.',
+        officialJobId: null,
+      };
+    }
+    // Already retired against an official advert: re-reading would fetch the same page again.
+    if (lead.lifecycleStatus === 'duplicate' && lead.duplicateOfJobId !== null) {
+      return {
+        status: 'refused',
+        reason: 'lead_already_complete',
+        message: 'This lead has already been replaced by the employer advert you supplied.',
+        officialJobId: null,
+      };
+    }
+    if (lead.descriptionCompleteness !== 'snippet') {
+      return {
+        status: 'refused',
+        reason: 'lead_already_complete',
+        message: 'This job already holds the full advert, so there is nothing to complete.',
+        officialJobId: null,
+      };
+    }
+    if (lead.canonicalUrl === input.url) {
+      return {
+        status: 'refused',
+        reason: 'same_as_lead_url',
+        message: 'That is the aggregator link the lead already has, not the employer advert.',
+        officialJobId: null,
+      };
+    }
+
+    const check = await checkOfficialUrl({
+      url: input.url,
+      sitePolicyFor: this.options.sitePolicyFor,
+      now,
+    });
+    if (!check.allowed) {
+      return {
+        status: 'refused',
+        reason: check.reason,
+        message: check.message,
+        officialJobId: null,
+      };
+    }
+
+    const source = await stores.sources.getByKey(input.sourceKey);
+    if (source === null) {
+      return {
+        status: 'refused',
+        reason: 'no_site_policy',
+        message: 'The manual source is not configured.',
+        officialJobId: null,
+      };
+    }
+
+    const fetcher = detailFetcherForDomain(check.domain);
+    if (fetcher === null) {
+      return {
+        status: 'refused',
+        reason: 'no_reviewed_reader',
+        message: `No reader exists for ${check.domain}.`,
+        officialJobId: null,
+      };
+    }
+
+    const { run } = await stores.discoveryRuns.begin({
+      sourceId: source.id,
+      trigger: 'manual_url',
+      idempotencyKey: `official_url:${input.jobId}:${input.url}`,
+      correlationId,
+      configVersionId: (await stores.configuration.current())?.id ?? null,
+      now,
+    });
+
+    const counts: DiscoveryRunCounts = { ...emptyDiscoveryRunCounts, fetched: 1 };
+    try {
+      const discovered = await fetcher(
+        input.url,
+        this.options.fetcher,
+        this.criteriaOptions(check.policy, new PolicyRateLimiter(check.policy), now),
+      );
+      const normalised = normaliseDiscoveredJob(source.sourceKey, discovered);
+      const result = await stores.jobs.ingest({
+        userId: this.options.userId,
+        sourceId: source.id,
+        sourceKey: source.sourceKey,
+        externalId: normalised.externalId,
+        discoveryRunId: run.id,
+        correlationId,
+        job: normalised,
+        requirements: extractJobRequirements(
+          normalised.description,
+          normalised.personSpecification.text,
+        ),
+        now,
+      });
+      if (result.outcome === 'created') counts.created = 1;
+      else counts.changed = 1;
+      await stores.discoveryRuns.finish({ runId: run.id, status: 'succeeded', counts, now });
+
+      // The lead and the official advert are the same vacancy. Marking the lead a duplicate of the
+      // official job keeps one applyable row, and the preparation panel already refuses a
+      // duplicate, so the lead can no longer start an application.
+      if (result.jobId !== input.jobId) {
+        await stores.tracking.setLifecycleStatus({
+          userId: this.options.userId,
+          jobId: input.jobId,
+          to: 'duplicate',
+          reason: `superseded_by_official_advert:${result.jobId}`,
+          duplicateOfJobId: result.jobId,
+          correlationId,
+          now,
+        });
+      }
+
+      return {
+        status: 'completed',
+        reason: null,
+        message: `Read the employer advert on ${check.domain}. Score it, then review it before applying.`,
+        officialJobId: result.jobId,
+      };
+    } catch (error) {
+      counts.errors = 1;
+      await stores.discoveryRuns.finish({
+        runId: run.id,
+        status: 'failed',
+        counts,
+        errorCode: error instanceof Error ? error.name : 'unknown_error',
+        now,
+      });
+      return {
+        status: 'refused',
+        reason: 'no_reviewed_reader',
+        message: 'The advert could not be read safely, so nothing was changed.',
+        officialJobId: null,
+      };
+    }
+  }
+
   private criteriaOptions(
     policy: SitePolicy,
     limiter: PolicyRateLimiter,

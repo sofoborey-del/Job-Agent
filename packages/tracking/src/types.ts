@@ -230,6 +230,14 @@ export type TrackedJobSummary = {
   firstSeenAt: string;
   lastSeenAt: string;
   jobVersion: number;
+  /**
+   * Whether the stored advert text is the employer's whole advert or an aggregator excerpt. A
+   * 'snippet' job can be listed and read, but no criteria were established from it, so it is never
+   * scored as a match and never starts an application.
+   */
+  descriptionCompleteness: 'full' | 'snippet';
+  /** Set when this row has been superseded by, or is a duplicate of, another tracked job. */
+  duplicateOfJobId: string | null;
 };
 
 export type TrackedJobPage = {
