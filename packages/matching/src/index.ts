@@ -37,6 +37,11 @@ export type DecisionInput = {
   /** 'snippet' means only an excerpt of the advert was available, so no criteria are established. */
   descriptionCompleteness?: 'full' | 'snippet';
   /**
+   * True when mandatory criteria were extracted but none could be judged either way. The criteria
+   * are visible to the person; the agent simply could not evidence them from the profile.
+   */
+  criteriaAllUnknown?: boolean;
+  /**
    * Whether the advert is open to external applicants. This is a standalone gate: no profile
    * evidence can satisfy being an existing employee, so it never consults the evidence matcher.
    */
@@ -149,6 +154,12 @@ export function decideMatch(input: DecisionInput, config: AgentConfig): MatchDec
       'The advert links a criteria document that could not be read safely, so its essential requirements are unknown.',
     );
   }
+  if (input.criteriaAllUnknown === true) {
+    autoBlockers.push('criteria_not_evidenced');
+    explanation.push(
+      'The criteria were read but none could be checked against your profile. Read them yourself before applying.',
+    );
+  }
   if (input.descriptionCompleteness === 'snippet') {
     autoBlockers.push('advert_text_truncated');
     explanation.push(
@@ -196,7 +207,9 @@ export function decideMatch(input: DecisionInput, config: AgentConfig): MatchDec
   // The same reasoning covers an advert whose text arrived as an excerpt from an aggregator: the
   // score was calculated without criteria nobody has seen, so it is not evidence for rejection.
   if (
-    (input.personSpecification === 'unreadable' || input.descriptionCompleteness === 'snippet') &&
+    (input.personSpecification === 'unreadable' ||
+      input.descriptionCompleteness === 'snippet' ||
+      input.criteriaAllUnknown === true) &&
     score < config.matching.thresholds.shortlist
   ) {
     explanation.push(

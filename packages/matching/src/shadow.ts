@@ -54,8 +54,10 @@ const stopWords = new Set([
  *
  * 1.4.0: equal-opportunities boilerplate no longer downgrades an explicit internal-only
  * restriction, which had left ineligible vacancies shortlisted.
+ * 1.5.0: criteria written as bullets in a PDF role profile are extracted, and a criterion the
+ * matcher cannot judge either way no longer counts as uncovered.
  */
-export const MATCHER_VERSION = 'shadow-1.4.0';
+export const MATCHER_VERSION = 'shadow-1.5.0';
 
 export type ShadowJob = {
   id: string;
@@ -194,6 +196,78 @@ function firstFactValue(facts: readonly KnowledgeFact<unknown>[], key: string): 
   )?.value;
 }
 
+const bulletMark = /^[•*‣◦⁃∙\-–—−]\s*/;
+
+/**
+ * Rejoins text that a PDF extractor split mid-sentence.
+ *
+ * A role profile extracted from PDF arrives column-wrapped: "Have significant experience within" on
+ * one line and "Organisational Development" on the next. Sentence-level matching cannot span that,
+ * which is why specifications were being read and then yielding nothing at all. A line continues
+ * the one before it unless it opens a new bullet, the previous line already ended a sentence, or it
+ * looks like a heading.
+ */
+export function reflowSpecificationLines(text: string): string[] {
+  const output: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '') continue;
+    const previous = output[output.length - 1];
+    const isHeading =
+      /^[A-Z][A-Za-z0-9 /&'(),-]{2,60}$/.test(line) && line.split(/\s+/).length <= 8;
+    const startsNew =
+      previous === undefined || bulletMark.test(line) || /[.!?:;]$/.test(previous) || isHeading;
+    if (startsNew) output.push(line.replace(bulletMark, ''));
+    else output[output.length - 1] = `${previous} ${line}`;
+  }
+  return output.map((line) => line.replace(/\s+/g, ' ').trim()).filter((line) => line !== '');
+}
+
+/** Headings after which bulleted lines state what the candidate must bring. */
+const criteriaHeading =
+  /^(person\s+specification|requirements?|qualifications?|experience|knowledge|technical\s+knowledge|skills|essential)\b/i;
+
+/** Headings that end a criteria section: what follows describes the post, not the candidate. */
+const nonCriteriaHeading =
+  /^(interdependenc|condition|company\s+overview|role\s+details|role\s+purpose|about\s|our\s+values|benefits|how\s+to\s+apply|main\s+duties|key\s+responsibilit|job\s+purpose|personal\s+attributes|behaviour|equal\s+opportunit)/i;
+
+/** A criterion the employer itself calls optional is not a mandatory requirement. */
+const desirableWording =
+  /\b(desirable|preferred|advantageous|an advantage|nice to have|would be useful)\b/i;
+
+/**
+ * Criteria written as bullets under a person-specification heading.
+ *
+ * Real specifications rarely say "must have"; they say "Have significant experience within…" under
+ * a "Person Specification" or "Requirements" heading. Only bullets inside such a section count, and
+ * anything the employer marks desirable is excluded, so this cannot sweep in duties or boilerplate.
+ */
+function bulletedCriteria(text: string): string[] {
+  const lines = reflowSpecificationLines(text);
+  // A line repeated across the document is a running header or footer, not a criterion.
+  const occurrences = new Map<string, number>();
+  for (const line of lines) occurrences.set(line, (occurrences.get(line) ?? 0) + 1);
+  const found: string[] = [];
+  let inSection = false;
+  for (const line of lines) {
+    const looksLikeHeading = line.length <= 70 && !/[.!?]$/.test(line);
+    if (looksLikeHeading && nonCriteriaHeading.test(line)) {
+      inSection = false;
+      continue;
+    }
+    if (looksLikeHeading && criteriaHeading.test(line)) {
+      inSection = true;
+      continue;
+    }
+    if (!inSection) continue;
+    if (line.length < 20 || line.length > 400) continue;
+    if (desirableWording.test(line)) continue;
+    if ((occurrences.get(line) ?? 0) > 1) continue;
+    found.push(line);
+  }
+  return found;
+}
+
 /** The deterministic requirement extractor. Exported so ingestion and matching agree exactly. */
 export function extractMandatoryRequirements(description: string): string[] {
   const candidates = description
@@ -214,7 +288,9 @@ export function extractMandatoryRequirements(description: string): string[] {
           line,
         ),
     );
-  return [...new Set(candidates)].slice(0, 25);
+  // Assertive wording first, then criteria written as bullets under a person-specification
+  // heading. The second path is what makes a real role profile yield anything at all.
+  return [...new Set([...candidates, ...bulletedCriteria(description)])].slice(0, 25);
 }
 
 function annualSalary(job: ShadowJob): AnnualSalary | undefined {
@@ -346,7 +422,20 @@ export function shadowMatch(
   const metRequirements = requirements.filter(
     (requirement) => requirement.outcome === 'met',
   ).length;
-  const evidenceCoverage = requirements.length === 0 ? 0.6 : metRequirements / requirements.length;
+  // Coverage measures what was actually judged, not what was merely seen.
+  //
+  // A criterion the matcher could not evidence either way is `unknown`, and an unknown mandatory
+  // criterion already blocks automatic progression on its own. Counting it as uncovered as well
+  // punishes the applicant twice for the agent's own blind spot: on real role profiles every
+  // criterion came back unknown, which drove otherwise reasonable vacancies to a score of 15.
+  const judgedRequirements = requirements.filter(
+    (requirement) => requirement.outcome === 'met' || requirement.outcome === 'not_met',
+  ).length;
+  const allCriteriaUnknown = requirements.length > 0 && judgedRequirements === 0;
+  const evidenceCoverage =
+    requirements.length === 0 || judgedRequirements === 0
+      ? 0.6
+      : metRequirements / judgedRequirements;
   const jobOpen = job.closesAt === null || new Date(job.closesAt).getTime() > now.getTime();
 
   const decision = decideMatch(
@@ -382,6 +471,7 @@ export function shadowMatch(
       mandatoryCriteriaVisible: truncated ? false : requirements.length > 0,
       internalOnly: internalOnly.status,
       descriptionCompleteness: job.descriptionCompleteness ?? 'full',
+      criteriaAllUnknown: allCriteriaUnknown,
     },
     config,
   );

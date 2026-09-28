@@ -27,6 +27,7 @@
     "walkthrough:phase2": "pnpm build && node scripts/phase-2-walkthrough.mjs",
     "licence:options": "pnpm build && node scripts/licence-threshold-options.mjs",
     "review:real-adverts": "pnpm build && node scripts/real-advert-review.mjs",
+    "criteria:report": "pnpm build && node --env-file=.env scripts/criteria-extraction-report.mjs",
     "discord:check": "node --env-file=.env scripts/discord-check.mjs",
     "discord:register": "node --env-file=.env scripts/register-discord-commands.mjs"
   },

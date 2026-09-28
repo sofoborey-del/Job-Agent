@@ -176,6 +176,42 @@ and anything sensitive stay excluded deliberately: those are declarations the pe
 The preparation response now also carries a nine-step `checklist`, which names the human-only steps
 rather than implying them, and the tracker renders it.
 
+### Resolved: criteria are read but not extracted (found and fixed 2026-09-28)
+
+Fixed in `MATCHER_VERSION` `shadow-1.5.0`, measured with `pnpm criteria:report` before and after
+against the ten real adverts.
+
+|                      | requirements extracted  | shortlisted | rejected |
+| -------------------- | ----------------------- | ----------- | -------- |
+| before               | 5 (all from one advert) | 4           | 6        |
+| extraction fix alone | 132                     | 1           | 9        |
+| shipped              | 132                     | 5           | 4        |
+
+Three changes, in the order they were needed:
+
+1. `reflowSpecificationLines` rejoins the column-wrapped fragments a PDF extractor produces, so a
+   criterion split across two lines is one sentence again.
+2. `bulletedCriteria` reads bullets under a person-specification, requirements or qualifications
+   heading, because real profiles say "Have significant experience within..." rather than "must
+   have". Headings that describe the post rather than the candidate end the section, lines the
+   employer calls desirable are excluded, and a line repeated across the document is treated as a
+   running header rather than a criterion.
+3. Coverage now measures what was actually **judged**, not what was seen. This mattered: with the
+   extraction fix alone every advert scored 15-17 and was rejected, because the matcher could not
+   evidence prose criteria either way and 24 unknowns counted as 24 uncovered. That punished the
+   applicant for the agent's blind spot. An unknown mandatory criterion already blocks automatic
+   progression on its own; it no longer also destroys the score, and a vacancy whose criteria could
+   not be checked is surfaced for review rather than rejected on a score computed without them —
+   the same treatment an unreadable specification and an aggregator excerpt already receive.
+
+The net effect is honesty rather than better discrimination. Scores barely moved, which is correct:
+the agent still cannot judge whether the applicant meets "significant experience within
+Organisational Development". What changed is that all 25 criteria are now visible on the job, every
+one carries a `mandatory_unknown` blocker, and the decision carries `criteria_not_evidenced`. The
+person reads the criteria and decides; the agent no longer implies it checked them.
+
+### Superseded note: the original defect report
+
 ### Open defect: criteria are read but not extracted (found 2026-09-28)
 
 Three of the four eligible shortlisted vacancies had their person specification successfully read
