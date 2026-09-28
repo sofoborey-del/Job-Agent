@@ -34,6 +34,8 @@ export type DecisionInput = {
    * requirements". Omitted is treated as `absent`, which is the pre-attachment behaviour.
    */
   personSpecification?: 'absent' | 'read' | 'unreadable';
+  /** 'snippet' means only an excerpt of the advert was available, so no criteria are established. */
+  descriptionCompleteness?: 'full' | 'snippet';
   /**
    * Whether the advert is open to external applicants. This is a standalone gate: no profile
    * evidence can satisfy being an existing employee, so it never consults the evidence matcher.
@@ -147,6 +149,12 @@ export function decideMatch(input: DecisionInput, config: AgentConfig): MatchDec
       'The advert links a criteria document that could not be read safely, so its essential requirements are unknown.',
     );
   }
+  if (input.descriptionCompleteness === 'snippet') {
+    autoBlockers.push('advert_text_truncated');
+    explanation.push(
+      'Only an excerpt of this advert was available from its source, so its requirements were never read.',
+    );
+  }
   if (input.mandatoryCriteriaVisible === false) {
     autoBlockers.push('no_mandatory_criteria_visible');
     explanation.push(
@@ -185,9 +193,16 @@ export function decideMatch(input: DecisionInput, config: AgentConfig): MatchDec
 
   // An advert that links criteria the agent could not read must not be discarded on a score that
   // was calculated without them. It is surfaced for review instead, with the reason attached.
-  if (input.personSpecification === 'unreadable' && score < config.matching.thresholds.shortlist) {
+  // The same reasoning covers an advert whose text arrived as an excerpt from an aggregator: the
+  // score was calculated without criteria nobody has seen, so it is not evidence for rejection.
+  if (
+    (input.personSpecification === 'unreadable' || input.descriptionCompleteness === 'snippet') &&
+    score < config.matching.thresholds.shortlist
+  ) {
     explanation.push(
-      'Kept for your review rather than rejected, because the score was calculated without criteria the agent could not read.',
+      input.descriptionCompleteness === 'snippet'
+        ? 'Kept for your review rather than rejected: only an excerpt of this advert was available, so its criteria were never seen. Open the advert to judge it.'
+        : 'Kept for your review rather than rejected, because the score was calculated without criteria the agent could not read.',
     );
     return {
       action: 'shortlist',

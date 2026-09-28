@@ -72,6 +72,12 @@ export type ShadowJob = {
     text?: string;
     reason?: string;
   };
+  /**
+   * Whether `description` is the whole advert or only an excerpt. Aggregator APIs return a
+   * snippet, and a snippet is not a person specification: no criteria can be established from one,
+   * however many requirement-shaped sentences it happens to contain.
+   */
+  descriptionCompleteness?: 'full' | 'snippet';
 };
 
 export type ExtractedRequirement = {
@@ -97,6 +103,8 @@ export type ShadowMatchResult = {
     fromPersonSpecification: number;
     visible: boolean;
     unreadableReason?: string;
+    /** 'snippet' means the advert text was an excerpt, so no criteria were established. */
+    descriptionCompleteness: 'full' | 'snippet';
   };
   /** Whether the advert is open to external applicants, and the sentences that decided it. */
   eligibility: InternalOnlyDetection;
@@ -229,6 +237,7 @@ export function shadowMatch(
   );
   const allEvidence = usableFacts.map((fact) => ({ fact, words: tokens(serialise(fact.value)) }));
 
+  const truncated = job.descriptionCompleteness === 'snippet';
   const specification = job.personSpecification;
   const specificationStatus = specification?.status ?? 'absent';
   const advertSentences = extractMandatoryRequirements(job.description);
@@ -357,8 +366,10 @@ export function shadowMatch(
       answersComplete: false,
       humanOnlyStepPresent: true,
       personSpecification: specificationStatus,
-      mandatoryCriteriaVisible: requirements.length > 0,
+      // A snippet can never establish criteria, whatever it happens to contain.
+      mandatoryCriteriaVisible: truncated ? false : requirements.length > 0,
       internalOnly: internalOnly.status,
+      descriptionCompleteness: job.descriptionCompleteness ?? 'full',
     },
     config,
   );
@@ -371,7 +382,8 @@ export function shadowMatch(
       personSpecification: specificationStatus,
       fromAdvertText: advertSentences.length,
       fromPersonSpecification: specificationSentences.length,
-      visible: requirements.length > 0,
+      visible: truncated ? false : requirements.length > 0,
+      descriptionCompleteness: job.descriptionCompleteness ?? 'full',
       ...(specification?.reason === undefined ? {} : { unreadableReason: specification.reason }),
     },
     eligibility: internalOnly,

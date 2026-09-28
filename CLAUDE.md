@@ -60,11 +60,15 @@ The architecture specification is authoritative. If implementation and specifica
   action at all; it is exercised only against synthetic fixtures.
 - Deterministic detection of adverts restricted to an employer’s existing staff or a named
   programme, as a hard gate that evidence overlap cannot satisfy.
+- A reviewed reader for the documented Adzuna search API, shipped disabled and unable to run without
+  a personal key. Its results are marked as excerpts, so no criteria can be established from them.
+- A draft permission request for MyJobScotland/TalentLink in docs/permission-request-draft.md, which
+  the user sends themselves. The agent has no outbound message capability.
 - Browser automation against a live site is not enabled; the fake ATS remains the only target the
   browser worker drives. No candidate-account access, no real
   employer form, and no submission capability outside that fake target.
 
-`pnpm check` passes 451 tests (the Playwright tests skip themselves on a machine where
+`pnpm check` passes 486 tests (the Playwright tests skip themselves on a machine where
 `pnpm browser:install` has not been run). Re-run it before and after material changes. On this Windows machine, if pnpm stalls while linking dependencies, use `pnpm install --package-import-method=copy`.
 
 `pnpm` itself was absent from this machine on 2026-09-25 and was installed globally with
@@ -254,6 +258,64 @@ Those bytes go to the worker and nowhere else: they are never logged and never i
 `apps/api/src/prompt-injection-corpus.test.ts`. Hostile advert and attached-document strings are
 kept as untrusted data: they cannot change policy, expose a fact not approved for matching, escape
 the reviewed host boundary or satisfy the independent submit guard.
+
+### A second discovery source: the Adzuna API (added 2026-09-28)
+
+**Why this one.** A source needs a documented permission a person can point at. Adzuna's developer
+terms list the permitted uses of its API as publishing Adzuna listings, publishing Jobsworth salary
+estimates, and **personal research**, and publish the default rate allowance (25/minute, 250/day,
+1000/week, 2500/month). That is written permission for a single person's private, non-commercial
+use, and it is the clearest such permission found.
+
+What was rejected, and why:
+
+| Candidate                     | Why not                                                                                                                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1Jobs, Totaljobs, CV-Library | No public search API for an individual job seeker. Using them would mean scraping pages, which this project does not do.                                                        |
+| Indeed                        | The publisher API was withdrawn; remaining access is partner-only. Page scraping is prohibited.                                                                                 |
+| DWP "Find a job"              | Publishes a bulk-upload specification for employers, not a public read API, and the service is being replaced.                                                                  |
+| Greenhouse / Lever board APIs | Genuinely public and documented, and worth adding later, but they are per-employer: each needs its own board token, and they cover few Scottish council or public-sector roles. |
+
+**The limitation that shaped the design.** Adzuna's own documentation states the search response
+carries only "a snipped of the job description". An excerpt is not a person specification. This is
+the September blocker in a new form — then it was a page summary standing in for an unopened
+criteria document — so the same rule applies: criteria nobody has seen were not met.
+
+Every Adzuna result is therefore marked `descriptionCompleteness: 'snippet'`, and the matcher:
+
+- forces `mandatoryCriteriaVisible: false`, whatever requirement-shaped sentences the excerpt holds;
+- adds the `advert_text_truncated` auto-blocker, so it can never progress automatically;
+- keeps a low-scoring truncated advert as `shortlist` rather than rejecting it, because that score
+  was calculated without criteria — the same rescue an unreadable person specification gets.
+
+Hard gates still win: a closed vacancy, a below-floor salary stated with confidence, an internal-only
+restriction or a user exclusion is still a reject. `truncated-advert.test.ts` pins all of this.
+
+Following `redirect_url` to read the full advert is deliberately **not** done: those are unreviewed
+third-party domains. The policy's `attachment_read_json` is NULL for exactly this reason.
+
+**Salary.** An Adzuna figure is that aggregator's normalisation of someone else's advert, so it is
+carried below the confidence `evaluateSalary` demands. The consequence, pinned by a test, is that an
+aggregator salary can never by itself satisfy the GBP 25,000 floor: it resolves to `unknown`, which
+blocks automatic progression. Below-floor adverts are kept out at the request instead, by passing
+`salary_min` to the API. A predicted salary is additionally marked as an estimate, not the
+employer's figure.
+
+**How it stays off.** Three independent things must all be true before a single request is made: the
+source row must be enabled (it ships disabled), `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` must both be in
+the local `.env` (the reader throws without them), and the scheduler must be switched on. The
+application key is redacted from every URL before it can reach a log or an error message, and a test
+pins that.
+
+**Registry change.** `sourceAdapterTypes` gained `public_api`, and the rule that a domain must have a
+reviewed, purpose-written reader is unchanged — an API source satisfies it through `apiReaderDomains`
+rather than by skipping the check. A `public_api` source without its documented endpoint recorded is
+refused, exactly as a feed source without a feed URL is.
+
+Migration `0007_adzuna_api_source.sql` records the reviewed policy: `official_api` discovery,
+`manual_only` apply, `reviewed_allowed` terms, evidence
+<https://developer.adzuna.com/docs/terms_of_service>. It is a discovery source and never an
+application route.
 
 ### Criteria that live in a linked document (added 2026-09-25)
 

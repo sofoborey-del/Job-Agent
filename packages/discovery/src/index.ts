@@ -5,3 +5,4 @@ export * from './portals.js';
 export * from './normalise.js';
 export * from './feed.js';
 export * from './sources.js';
+export * from './adzuna.js';
