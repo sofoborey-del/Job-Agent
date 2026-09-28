@@ -176,6 +176,36 @@ and anything sensitive stay excluded deliberately: those are declarations the pe
 The preparation response now also carries a nine-step `checklist`, which names the human-only steps
 rather than implying them, and the tracker renders it.
 
+### Open defect: criteria are read but not extracted (found 2026-09-28)
+
+Three of the four eligible shortlisted vacancies had their person specification successfully read
+from the linked PDF — 8,587, 9,916 and 19,539 characters — and **all four extracted zero
+requirements**. Every shortlist score is therefore still a "no criteria were established" score,
+which is the exact failure the linked-document work was built to prevent.
+
+Two causes, both in `extractMandatoryRequirements`:
+
+1. **PDF text arrives column-wrapped.** A role profile extracts as short fragments
+   ("Organisational" / "Development Advisor" on separate lines), so a sentence-level regex cannot
+   match across the wrap.
+2. **Real specifications do not say "must".** They use a bulleted "Person Specification" or
+   "Requirements" section: "Have significant experience within Organisational Development…",
+   "CIPD Level 5 qualification (or equivalent professional qualification) or significant relevant
+   experience." The extractor requires "must have", "is essential" or "is required", none of which
+   appear. The word "essential" is absent from the OD Advisor profile entirely.
+
+What this cost, concretely: Organisational Development Advisor scored 54 and was shortlisted. Its
+real criteria are significant Organisational Development, workforce planning and change management
+experience plus CIPD Level 5 or equivalent, at SCP 33-36. Administrative Officer (HSCC) requires
+supervising, allocating and reviewing a team and handling discipline and grievance. Neither is
+visible to the matcher.
+
+**Not fixed in this commit, deliberately.** Reflowing wrapped lines and treating bullets under a
+person-specification heading as mandatory would change every score in the tracker, and the handoff
+rule is that scoring consequences are decided deliberately rather than tuned in passing. The fix
+should be made with a measured before-and-after across the real corpus, as the criteria-document
+change was.
+
 ### The permission question, answered
 
 `https://www.myjobscotland.gov.uk/robots.txt` reads:
