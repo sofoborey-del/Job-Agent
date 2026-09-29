@@ -24,24 +24,36 @@ export type CvHistoryDraft = {
   warnings: string[];
 };
 
-const month = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)';
-const datedTitle = new RegExp(`^(.+?)\\s+(${month}\\s+\\d{4})\\s*[–—-]\\s*(${month}\\s+\\d{4}|Present|Current)$`, 'i');
+const month =
+  '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)';
+const datedTitle = new RegExp(
+  `^(.+?)\\s+(${month}\\s+\\d{4})\\s*[–—-]\\s*(${month}\\s+\\d{4}|Present|Current)$`,
+  'i',
+);
 const bullet = /^[•*\-–—]\s+/;
 
 function clean(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-export function draftHistoryFromReviewedCv(employmentText: string, educationText: string): CvHistoryDraft {
+export function draftHistoryFromReviewedCv(
+  employmentText: string,
+  educationText: string,
+): CvHistoryDraft {
   const warnings: string[] = [];
   const employment: DraftEmployment[] = [];
-  const lines = employmentText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = employmentText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   for (let index = 0; index < lines.length; index += 1) {
     const match = datedTitle.exec(lines[index] ?? '');
     if (match === null) continue;
     const employerLine = lines[index + 1] ?? '';
     if (employerLine === '' || bullet.test(employerLine) || datedTitle.test(employerLine)) {
-      warnings.push(`The employer for role ${String(employment.length + 1)} could not be identified; check the CV.`);
+      warnings.push(
+        `The employer for role ${String(employment.length + 1)} could not be identified; check the CV.`,
+      );
       continue;
     }
     const duties: string[] = [];
@@ -61,18 +73,29 @@ export function draftHistoryFromReviewedCv(employmentText: string, educationText
     });
   }
   if (employment.length === 0 && employmentText.trim() !== '') {
-    warnings.push('No dated roles could be extracted automatically. Add them from the CV before confirming.');
+    warnings.push(
+      'No dated roles could be extracted automatically. Add them from the CV before confirming.',
+    );
   }
   if (employment.length > 0) {
-    warnings.push('Check every employer name: a CV line may include a town or work pattern after it.');
-    warnings.push('Only month and year are present in the CV. Do not invent a day when an application asks for one.');
+    warnings.push(
+      'Check every employer name: a CV line may include a town or work pattern after it.',
+    );
+    warnings.push(
+      'Only month and year are present in the CV. Do not invent a day when an application asks for one.',
+    );
   }
 
   const education: DraftEducation[] = [];
-  for (const sourceLine of educationText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)) {
+  for (const sourceLine of educationText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)) {
     const parts = sourceLine.split(/\s+[–—-]\s+/, 2);
     if (parts.length !== 2) {
-      warnings.push('An education line was not recognised. Compare the draft with the CV before confirming.');
+      warnings.push(
+        'An education line was not recognised. Compare the draft with the CV before confirming.',
+      );
       continue;
     }
     const detail = (parts[1] ?? '').split(/\s*\|\s*/, 2);
@@ -85,13 +108,20 @@ export function draftHistoryFromReviewedCv(employmentText: string, educationText
       qualification: clean(parts[0] ?? ''),
       field: null,
       startDate: commenced === null ? null : clean(commenced[1] ?? ''),
-      endDate: completed === null ? (commenced === null ? year?.[0] ?? null : null) : clean(completed[1] ?? ''),
+      endDate:
+        completed === null
+          ? commenced === null
+            ? (year?.[0] ?? null)
+            : null
+          : clean(completed[1] ?? ''),
       grade: null,
       sourceLine,
     });
   }
   if (education.length === 0 && educationText.trim() !== '') {
-    warnings.push('No qualifications could be extracted automatically. Add them from the CV before confirming.');
+    warnings.push(
+      'No qualifications could be extracted automatically. Add them from the CV before confirming.',
+    );
   }
   return { employment, education, warnings };
 }

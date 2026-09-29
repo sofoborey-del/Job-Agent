@@ -10,14 +10,20 @@ describe('reviewed CV history draft', () => {
     );
     expect(draft.employment).toHaveLength(2);
     expect(draft.employment[0]).toMatchObject({
-      employer: 'Example Firm Remote / Glasgow', title: 'Customer Adviser',
-      startDate: 'Jul 2025', endDate: 'Jun 2026',
+      employer: 'Example Firm Remote / Glasgow',
+      title: 'Customer Adviser',
+      startDate: 'Jul 2025',
+      endDate: 'Jun 2026',
       evidenceSummary: '• Supported customers. • Maintained records.',
     });
-    expect(draft.warnings).toContain('Check every employer name: a CV line may include a town or work pattern after it.');
+    expect(draft.warnings).toContain(
+      'Check every employer name: a CV line may include a town or work pattern after it.',
+    );
     expect(draft.education).toHaveLength(3);
     expect(draft.education[1]).toMatchObject({
-      qualification: 'Professional Diploma', startDate: 'January 2026', endDate: null,
+      qualification: 'Professional Diploma',
+      startDate: 'January 2026',
+      endDate: null,
     });
     expect(draft.education[2]?.qualification).toContain('part-completed');
   });
@@ -29,6 +35,8 @@ describe('reviewed CV history draft', () => {
     );
     expect(draft.employment).toEqual([]);
     expect(draft.education).toEqual([]);
-    expect(draft.warnings).toContain('No dated roles could be extracted automatically. Add them from the CV before confirming.');
+    expect(draft.warnings).toContain(
+      'No dated roles could be extracted automatically. Add them from the CV before confirming.',
+    );
   });
 });

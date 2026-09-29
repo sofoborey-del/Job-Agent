@@ -6,7 +6,16 @@ import { z } from 'zod';
 import { fetchMyJobScotlandJob, type DiscoveredJob } from '@job-agent/discovery';
 import { findMissingProfileCategories } from '@job-agent/knowledge-base';
 import { shadowMatch } from '@job-agent/matching';
-import { applyLeavingReasonLinks, draftHistoryFromReviewedCv, draftLeavingReasonLinks, type CvProcessingService, type DocumentService, type EmploymentRowRef, type LeavingReasonRecord, type ProfileService } from '@job-agent/profile';
+import {
+  applyLeavingReasonLinks,
+  draftHistoryFromReviewedCv,
+  draftLeavingReasonLinks,
+  type CvProcessingService,
+  type DocumentService,
+  type EmploymentRowRef,
+  type LeavingReasonRecord,
+  type ProfileService,
+} from '@job-agent/profile';
 import { secureTokenEquals } from '@job-agent/security';
 
 import { cvReviewPageHtml } from './cv-review-page.js';
@@ -17,7 +26,13 @@ import { profileHistoryPageHtml } from './profile-history-page.js';
 import { shadowMatchPageHtml } from './shadow-match-page.js';
 import { registerApplicationRoutes, type ApplicationRuntime } from './application-routes.js';
 import { trackerPageHtml } from './tracker-page.js';
-import { answerTopicFactKey, answerTopicIsSensitive, answerTopicSchema, answerTopics, storedAnswerSchema } from './answer-vault.js';
+import {
+  answerTopicFactKey,
+  answerTopicIsSensitive,
+  answerTopicSchema,
+  answerTopics,
+  storedAnswerSchema,
+} from './answer-vault.js';
 import { answerVaultPageHtml } from './answer-vault-page.js';
 import { registerTrackerRoutes, type TrackingRuntime } from './tracker-routes.js';
 
@@ -95,9 +110,12 @@ async function reviewedHistoryTexts(service: ProfileService, userId: string) {
   const employment = facts.find((fact) => fact.key === 'employment.cv_reviewed_text');
   const education = facts.find((fact) => fact.key === 'education.cv_reviewed_text');
   if (
-    employment?.status !== 'verified' || education?.status !== 'verified' ||
-    typeof employment.value !== 'string' || typeof education.value !== 'string'
-  ) return null;
+    employment?.status !== 'verified' ||
+    education?.status !== 'verified' ||
+    typeof employment.value !== 'string' ||
+    typeof education.value !== 'string'
+  )
+    return null;
   return { employment, education, facts, sourceRevision: `${employment.id}:${education.id}` };
 }
 
@@ -221,14 +239,16 @@ export function buildServer(options: BuildServerOptions): FastifyInstance {
   );
 
   app.get('/profile-history', (_request, reply) =>
-    reply.header('content-security-policy', localPageCsp)
+    reply
+      .header('content-security-policy', localPageCsp)
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
       .send(profileHistoryPageHtml),
   );
 
   app.get('/answer-vault', (_request, reply) =>
-    reply.header('content-security-policy', localPageCsp)
+    reply
+      .header('content-security-policy', localPageCsp)
       .header('cache-control', 'no-store')
       .type('text/html; charset=utf-8')
       .send(answerVaultPageHtml),
@@ -413,44 +433,84 @@ export function buildServer(options: BuildServerOptions): FastifyInstance {
     return { facts: await options.profileService.listFacts(userId.data) };
   });
 
-  app.get<{ Params: { userId: string } }>('/v1/profile/:userId/history-draft', async (request, reply) => {
-    const userId = z.uuid().safeParse(request.params.userId);
-    if (!userId.success) return reply.code(400).send({ error: 'invalid_user_id' });
-    const reviewed = await reviewedHistoryTexts(options.profileService, userId.data);
-    if (reviewed === null) return reply.code(409).send({ error: 'reviewed_cv_sections_missing', message: 'Review and approve your CV sections first.' });
-    const draft = draftHistoryFromReviewedCv(reviewed.employment.value as string, reviewed.education.value as string);
-    return reply.header('cache-control', 'no-store').send({ ...draft, sourceRevision: reviewed.sourceRevision });
-  });
+  app.get<{ Params: { userId: string } }>(
+    '/v1/profile/:userId/history-draft',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      if (!userId.success) return reply.code(400).send({ error: 'invalid_user_id' });
+      const reviewed = await reviewedHistoryTexts(options.profileService, userId.data);
+      if (reviewed === null)
+        return reply
+          .code(409)
+          .send({
+            error: 'reviewed_cv_sections_missing',
+            message: 'Review and approve your CV sections first.',
+          });
+      const draft = draftHistoryFromReviewedCv(
+        reviewed.employment.value as string,
+        reviewed.education.value as string,
+      );
+      return reply
+        .header('cache-control', 'no-store')
+        .send({ ...draft, sourceRevision: reviewed.sourceRevision });
+    },
+  );
 
-  app.post<{ Params: { userId: string } }>('/v1/profile/:userId/history-confirm', async (request, reply) => {
-    const userId = z.uuid().safeParse(request.params.userId);
-    const body = historyConfirmationSchema.safeParse(request.body);
-    if (!userId.success || !body.success) return reply.code(400).send({ error: 'invalid_request' });
-    const reviewed = await reviewedHistoryTexts(options.profileService, userId.data);
-    if (reviewed?.sourceRevision !== body.data.sourceRevision) {
-      return reply.code(409).send({ error: 'cv_review_changed', message: 'The reviewed CV changed. Reload and check the draft again.' });
-    }
-    const entries = [
-      ['employment.history', body.data.employment],
-      ['education.history', body.data.education],
-    ] as const;
-    const updated: string[] = [];
-    for (const [key, value] of entries) {
-      const current = reviewed.facts.find((fact) => fact.key === key);
-      if (JSON.stringify(current?.value) === JSON.stringify(value)) continue;
-      await options.profileService.addConfirmedUserFact({
-        userId: userId.data, key, value, confirmed: true,
-        sensitivity: 'normal', usePolicy: 'auto_fill', allowedPurposes: ['matching', 'application'],
-      });
-      updated.push(key);
-    }
-    return reply.header('cache-control', 'no-store').send({ saved: true, updated, employmentCount: body.data.employment.length, educationCount: body.data.education.length });
-  });
+  app.post<{ Params: { userId: string } }>(
+    '/v1/profile/:userId/history-confirm',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      const body = historyConfirmationSchema.safeParse(request.body);
+      if (!userId.success || !body.success)
+        return reply.code(400).send({ error: 'invalid_request' });
+      const reviewed = await reviewedHistoryTexts(options.profileService, userId.data);
+      if (reviewed?.sourceRevision !== body.data.sourceRevision) {
+        return reply
+          .code(409)
+          .send({
+            error: 'cv_review_changed',
+            message: 'The reviewed CV changed. Reload and check the draft again.',
+          });
+      }
+      const entries = [
+        ['employment.history', body.data.employment],
+        ['education.history', body.data.education],
+      ] as const;
+      const updated: string[] = [];
+      for (const [key, value] of entries) {
+        const current = reviewed.facts.find((fact) => fact.key === key);
+        if (JSON.stringify(current?.value) === JSON.stringify(value)) continue;
+        await options.profileService.addConfirmedUserFact({
+          userId: userId.data,
+          key,
+          value,
+          confirmed: true,
+          sensitivity: 'normal',
+          usePolicy: 'auto_fill',
+          allowedPurposes: ['matching', 'application'],
+        });
+        updated.push(key);
+      }
+      return reply
+        .header('cache-control', 'no-store')
+        .send({
+          saved: true,
+          updated,
+          employmentCount: body.data.employment.length,
+          educationCount: body.data.education.length,
+        });
+    },
+  );
 
   const leavingReasonLinkSchema = z.object({
     sourceRevision: z.string().min(3).max(200),
     links: z
-      .array(z.object({ rowIndex: z.number().int().min(0).max(49), reasonKey: z.string().min(1).max(200) }))
+      .array(
+        z.object({
+          rowIndex: z.number().int().min(0).max(49),
+          reasonKey: z.string().min(1).max(200),
+        }),
+      )
       .max(50),
     confirmed: z.literal(true),
   });
@@ -506,23 +566,26 @@ export function buildServer(options: BuildServerOptions): FastifyInstance {
     };
   }
 
-  app.get<{ Params: { userId: string } }>('/v1/profile/:userId/leaving-reasons', async (request, reply) => {
-    const userId = z.uuid().safeParse(request.params.userId);
-    if (!userId.success) return reply.code(400).send({ error: 'invalid_user_id' });
-    const state = await leavingReasonState(options.profileService, userId.data);
-    if (state === null) {
-      return reply.code(409).send({
-        error: 'employment_history_missing',
-        message: 'Confirm your employment history first.',
+  app.get<{ Params: { userId: string } }>(
+    '/v1/profile/:userId/leaving-reasons',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      if (!userId.success) return reply.code(400).send({ error: 'invalid_user_id' });
+      const state = await leavingReasonState(options.profileService, userId.data);
+      if (state === null) {
+        return reply.code(409).send({
+          error: 'employment_history_missing',
+          message: 'Confirm your employment history first.',
+        });
+      }
+      const draft = draftLeavingReasonLinks(state.history, state.reasons);
+      return reply.header('cache-control', 'no-store').send({
+        ...draft,
+        reasons: state.reasons,
+        sourceRevision: state.sourceRevision,
       });
-    }
-    const draft = draftLeavingReasonLinks(state.history, state.reasons);
-    return reply.header('cache-control', 'no-store').send({
-      ...draft,
-      reasons: state.reasons,
-      sourceRevision: state.sourceRevision,
-    });
-  });
+    },
+  );
 
   /**
    * Records which reason belongs to which role.
@@ -532,80 +595,106 @@ export function buildServer(options: BuildServerOptions): FastifyInstance {
    * person originally typed is preserved on the fact, and the previous version survives anyway
    * because facts are versioned.
    */
-  app.post<{ Params: { userId: string } }>('/v1/profile/:userId/leaving-reasons', async (request, reply) => {
-    const userId = z.uuid().safeParse(request.params.userId);
-    const body = leavingReasonLinkSchema.safeParse(request.body);
-    if (!userId.success || !body.success) return reply.code(400).send({ error: 'invalid_request' });
-    const state = await leavingReasonState(options.profileService, userId.data);
-    if (state === null) return reply.code(409).send({ error: 'employment_history_missing' });
-    if (state.sourceRevision !== body.data.sourceRevision) {
-      return reply.code(409).send({
-        error: 'profile_changed',
-        message: 'Your history or reasons changed. Reload and check the links again.',
+  app.post<{ Params: { userId: string } }>(
+    '/v1/profile/:userId/leaving-reasons',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      const body = leavingReasonLinkSchema.safeParse(request.body);
+      if (!userId.success || !body.success)
+        return reply.code(400).send({ error: 'invalid_request' });
+      const state = await leavingReasonState(options.profileService, userId.data);
+      if (state === null) return reply.code(409).send({ error: 'employment_history_missing' });
+      if (state.sourceRevision !== body.data.sourceRevision) {
+        return reply.code(409).send({
+          error: 'profile_changed',
+          message: 'Your history or reasons changed. Reload and check the links again.',
+        });
+      }
+      const outcome = applyLeavingReasonLinks(state.history, state.reasons, body.data.links);
+      if (!outcome.ok) return reply.code(400).send({ error: outcome.error });
+      for (const update of outcome.updates) {
+        await options.profileService.addConfirmedUserFact({
+          userId: userId.data,
+          key: update.key,
+          value: update.value,
+          confirmed: true,
+          sensitivity: 'personal',
+          usePolicy: 'auto_fill',
+          allowedPurposes: ['matching', 'application'],
+        });
+      }
+      return reply.header('cache-control', 'no-store').send({
+        saved: true,
+        updated: outcome.updates.length,
+        linked: body.data.links.length,
       });
-    }
-    const outcome = applyLeavingReasonLinks(state.history, state.reasons, body.data.links);
-    if (!outcome.ok) return reply.code(400).send({ error: outcome.error });
-    for (const update of outcome.updates) {
-      await options.profileService.addConfirmedUserFact({
-        userId: userId.data,
-        key: update.key,
-        value: update.value,
-        confirmed: true,
-        sensitivity: 'personal',
-        usePolicy: 'auto_fill',
-        allowedPurposes: ['matching', 'application'],
-      });
-    }
-    return reply.header('cache-control', 'no-store').send({
-      saved: true,
-      updated: outcome.updates.length,
-      linked: body.data.links.length,
-    });
-  });
+    },
+  );
 
-  app.get<{ Params: { userId: string } }>('/v1/profile/:userId/answer-vault', async (request, reply) => {
-    const userId = z.uuid().safeParse(request.params.userId);
-    if (!userId.success) return reply.code(400).send({ error: 'invalid_user_id' });
-    const facts = await options.profileService.listFacts(userId.data);
-    const entries = answerTopics.flatMap((topic) => {
-      const fact = facts.find((candidate) => candidate.key === answerTopicFactKey(topic));
-      const value = storedAnswerSchema.safeParse(fact?.value);
-      return value.success && value.data.topic === topic
-        ? [{ topic, answer: value.data.answer, sensitive: answerTopicIsSensitive(topic), version: fact?.version }]
-        : [];
-    });
-    return reply.header('cache-control', 'no-store').send({ entries });
-  });
+  app.get<{ Params: { userId: string } }>(
+    '/v1/profile/:userId/answer-vault',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      if (!userId.success) return reply.code(400).send({ error: 'invalid_user_id' });
+      const facts = await options.profileService.listFacts(userId.data);
+      const entries = answerTopics.flatMap((topic) => {
+        const fact = facts.find((candidate) => candidate.key === answerTopicFactKey(topic));
+        const value = storedAnswerSchema.safeParse(fact?.value);
+        return value.success && value.data.topic === topic
+          ? [
+              {
+                topic,
+                answer: value.data.answer,
+                sensitive: answerTopicIsSensitive(topic),
+                version: fact?.version,
+              },
+            ]
+          : [];
+      });
+      return reply.header('cache-control', 'no-store').send({ entries });
+    },
+  );
 
   app.put<{ Params: { userId: string; topic: string } }>(
-    '/v1/profile/:userId/answer-vault/:topic', async (request, reply) => {
+    '/v1/profile/:userId/answer-vault/:topic',
+    async (request, reply) => {
       const userId = z.uuid().safeParse(request.params.userId);
       const topic = answerTopicSchema.safeParse(request.params.topic);
-      const body = z.object({ answer: z.string().trim().min(1).max(3000), confirmed: z.literal(true) }).safeParse(request.body);
-      if (!userId.success || !topic.success || !body.success) return reply.code(400).send({ error: 'invalid_request' });
+      const body = z
+        .object({ answer: z.string().trim().min(1).max(3000), confirmed: z.literal(true) })
+        .safeParse(request.body);
+      if (!userId.success || !topic.success || !body.success)
+        return reply.code(400).send({ error: 'invalid_request' });
       const key = answerTopicFactKey(topic.data);
       const value = { topic: topic.data, answer: body.data.answer };
-      const current = (await options.profileService.listFacts(userId.data)).find((fact) => fact.key === key);
+      const current = (await options.profileService.listFacts(userId.data)).find(
+        (fact) => fact.key === key,
+      );
       if (JSON.stringify(current?.value) === JSON.stringify(value)) {
         return reply.header('cache-control', 'no-store').send({ saved: true, changed: false });
       }
       await options.profileService.addConfirmedUserFact({
-        userId: userId.data, key, value, confirmed: true,
+        userId: userId.data,
+        key,
+        value,
+        confirmed: true,
         sensitivity: answerTopicIsSensitive(topic.data) ? 'high_risk' : 'personal',
         // The vault is not an automatic answer source yet. A later adapter needs exact-question
         // matching, an allowed site and a separate use policy before it may fill anything.
-        usePolicy: 'never_auto_fill', allowedPurposes: ['application'],
+        usePolicy: 'never_auto_fill',
+        allowedPurposes: ['application'],
       });
       return reply.header('cache-control', 'no-store').send({ saved: true, changed: true });
     },
   );
 
   app.delete<{ Params: { userId: string; topic: string } }>(
-    '/v1/profile/:userId/answer-vault/:topic', async (request, reply) => {
+    '/v1/profile/:userId/answer-vault/:topic',
+    async (request, reply) => {
       const userId = z.uuid().safeParse(request.params.userId);
       const topic = answerTopicSchema.safeParse(request.params.topic);
-      if (!userId.success || !topic.success) return reply.code(400).send({ error: 'invalid_request' });
+      if (!userId.success || !topic.success)
+        return reply.code(400).send({ error: 'invalid_request' });
       await options.profileService.deleteUserFact(userId.data, answerTopicFactKey(topic.data));
       return reply.header('cache-control', 'no-store').send({ removed: true });
     },

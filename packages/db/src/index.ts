@@ -159,8 +159,14 @@ export class PostgresProfileRepository implements ProfileRepository, DocumentRep
 
   async deleteFactVersions(userId: string, key: string): Promise<void> {
     await inTransaction(this.pool, async (client) => {
-      await client.query('DELETE FROM knowledge_facts WHERE user_id = $1 AND key = $2', [userId, key]);
-      await client.query('DELETE FROM knowledge_fact_versions WHERE user_id = $1 AND key = $2', [userId, key]);
+      await client.query('DELETE FROM knowledge_facts WHERE user_id = $1 AND key = $2', [
+        userId,
+        key,
+      ]);
+      await client.query('DELETE FROM knowledge_fact_versions WHERE user_id = $1 AND key = $2', [
+        userId,
+        key,
+      ]);
     });
   }
 

@@ -142,8 +142,14 @@ export class PGliteProfileRepository implements ProfileRepository, DocumentRepos
 
   async deleteFactVersions(userId: string, key: string): Promise<void> {
     await this.db.transaction(async (transaction) => {
-      await transaction.query('DELETE FROM knowledge_facts WHERE user_id = $1 AND key = $2', [userId, key]);
-      await transaction.query('DELETE FROM knowledge_fact_versions WHERE user_id = $1 AND key = $2', [userId, key]);
+      await transaction.query('DELETE FROM knowledge_facts WHERE user_id = $1 AND key = $2', [
+        userId,
+        key,
+      ]);
+      await transaction.query(
+        'DELETE FROM knowledge_fact_versions WHERE user_id = $1 AND key = $2',
+        [userId, key],
+      );
     });
   }
 

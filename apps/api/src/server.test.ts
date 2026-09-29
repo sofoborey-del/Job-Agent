@@ -362,39 +362,100 @@ describe('local onboarding API', () => {
     const user = await profileService.createUser();
     const headers = { authorization: `Bearer ${adminToken}` };
     for (const [key, value] of [
-      ['employment.cv_reviewed_text', 'Adviser Jul 2025 – Jun 2026\nExample Firm Remote\n• Supported customers.'],
+      [
+        'employment.cv_reviewed_text',
+        'Adviser Jul 2025 – Jun 2026\nExample Firm Remote\n• Supported customers.',
+      ],
       ['education.cv_reviewed_text', 'Certificate — Example College | Completed May 2025'],
     ] as const) {
       await profileService.addConfirmedUserFact({
-        userId: user.userId, key, value, confirmed: true, sensitivity: 'normal',
-        usePolicy: 'auto_fill', allowedPurposes: ['matching', 'application'],
+        userId: user.userId,
+        key,
+        value,
+        confirmed: true,
+        sensitivity: 'normal',
+        usePolicy: 'auto_fill',
+        allowedPurposes: ['matching', 'application'],
       });
     }
     const path = `/v1/profile/${user.userId}`;
-    expect((await app.inject({ method: 'GET', url: `${path}/history-draft` })).statusCode).toBe(401);
-    const draftResponse = await app.inject({ method: 'GET', url: `${path}/history-draft`, headers });
+    expect((await app.inject({ method: 'GET', url: `${path}/history-draft` })).statusCode).toBe(
+      401,
+    );
+    const draftResponse = await app.inject({
+      method: 'GET',
+      url: `${path}/history-draft`,
+      headers,
+    });
     expect(draftResponse.statusCode).toBe(200);
     expect(draftResponse.headers['cache-control']).toBe('no-store');
     const draft = draftResponse.json<{
       sourceRevision: string;
-      employment: Array<{ employer: string; title: string; startDate: string | null; endDate: string | null; evidenceSummary: string | null }>;
-      education: Array<{ institution: string; qualification: string; field: string | null; startDate: string | null; endDate: string | null; grade: string | null }>;
+      employment: Array<{
+        employer: string;
+        title: string;
+        startDate: string | null;
+        endDate: string | null;
+        evidenceSummary: string | null;
+      }>;
+      education: Array<{
+        institution: string;
+        qualification: string;
+        field: string | null;
+        startDate: string | null;
+        endDate: string | null;
+        grade: string | null;
+      }>;
     }>();
     expect(draft.employment).toHaveLength(1);
-    expect((await profileService.listFacts(user.userId)).find((fact) => fact.key === 'employment.history')).toBeUndefined();
+    expect(
+      (await profileService.listFacts(user.userId)).find(
+        (fact) => fact.key === 'employment.history',
+      ),
+    ).toBeUndefined();
     const payload = {
       sourceRevision: draft.sourceRevision,
       employment: draft.employment.map((entry) => ({ ...entry, employer: 'Example Firm' })),
-      education: draft.education.map(({ institution, qualification, field, startDate, endDate, grade }) => ({ institution, qualification, field, startDate, endDate, grade })),
+      education: draft.education.map(
+        ({ institution, qualification, field, startDate, endDate, grade }) => ({
+          institution,
+          qualification,
+          field,
+          startDate,
+          endDate,
+          grade,
+        }),
+      ),
       confirmed: true,
     };
-    expect((await app.inject({ method: 'POST', url: `${path}/history-confirm`, headers, payload: { ...payload, confirmed: false } })).statusCode).toBe(400);
-    const saved = await app.inject({ method: 'POST', url: `${path}/history-confirm`, headers, payload });
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `${path}/history-confirm`,
+          headers,
+          payload: { ...payload, confirmed: false },
+        })
+      ).statusCode,
+    ).toBe(400);
+    const saved = await app.inject({
+      method: 'POST',
+      url: `${path}/history-confirm`,
+      headers,
+      payload,
+    });
     expect(saved.statusCode).toBe(200);
     expect(saved.json()).toMatchObject({ saved: true, employmentCount: 1, educationCount: 1 });
     const facts = await profileService.listFacts(user.userId);
-    expect(facts.find((fact) => fact.key === 'employment.history')?.value).toMatchObject([{ employer: 'Example Firm' }]);
-    const replay = await app.inject({ method: 'POST', url: `${path}/history-confirm`, headers, payload });
+    expect(facts.find((fact) => fact.key === 'employment.history')?.value).toMatchObject([
+      { employer: 'Example Firm' },
+    ]);
+    const replay = await app.inject({
+      method: 'POST',
+      url: `${path}/history-confirm`,
+      headers,
+      payload,
+    });
     expect(replay.json<{ updated: string[] }>().updated).toEqual([]);
   });
 
@@ -402,20 +463,53 @@ describe('local onboarding API', () => {
     const user = await profileService.createUser();
     const headers = { authorization: `Bearer ${adminToken}` };
     const url = `/v1/profile/${user.userId}/answer-vault/sexual_orientation`;
-    expect((await app.inject({ method: 'GET', url: `/v1/profile/${user.userId}/answer-vault` })).statusCode).toBe(401);
-    expect((await app.inject({ method: 'PUT', url, headers, payload: { answer: 'Prefer not to say', confirmed: false } })).statusCode).toBe(400);
-    const saved = await app.inject({ method: 'PUT', url, headers, payload: { answer: 'Prefer not to say', confirmed: true } });
+    expect(
+      (await app.inject({ method: 'GET', url: `/v1/profile/${user.userId}/answer-vault` }))
+        .statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: 'PUT',
+          url,
+          headers,
+          payload: { answer: 'Prefer not to say', confirmed: false },
+        })
+      ).statusCode,
+    ).toBe(400);
+    const saved = await app.inject({
+      method: 'PUT',
+      url,
+      headers,
+      payload: { answer: 'Prefer not to say', confirmed: true },
+    });
     expect(saved.statusCode).toBe(200);
     expect(saved.body).not.toContain('Prefer not to say');
-    const fact = (await profileService.listFacts(user.userId)).find((item) => item.key === 'application.answer_vault.sexual_orientation');
-    expect(fact).toMatchObject({ sensitivity: 'high_risk', usePolicy: 'never_auto_fill', allowedPurposes: ['application'] });
+    const fact = (await profileService.listFacts(user.userId)).find(
+      (item) => item.key === 'application.answer_vault.sexual_orientation',
+    );
+    expect(fact).toMatchObject({
+      sensitivity: 'high_risk',
+      usePolicy: 'never_auto_fill',
+      allowedPurposes: ['application'],
+    });
     if (fact === undefined) throw new Error('Saved answer fact was not found');
     expect(resolveFact(fact, 'application').status).toBe('requires_user');
-    const listed = await app.inject({ method: 'GET', url: `/v1/profile/${user.userId}/answer-vault`, headers });
+    const listed = await app.inject({
+      method: 'GET',
+      url: `/v1/profile/${user.userId}/answer-vault`,
+      headers,
+    });
     expect(listed.headers['cache-control']).toBe('no-store');
-    expect(listed.json()).toMatchObject({ entries: [{ topic: 'sexual_orientation', answer: 'Prefer not to say', sensitive: true }] });
+    expect(listed.json()).toMatchObject({
+      entries: [{ topic: 'sexual_orientation', answer: 'Prefer not to say', sensitive: true }],
+    });
     expect((await app.inject({ method: 'DELETE', url, headers })).statusCode).toBe(200);
-    expect((await profileService.listFacts(user.userId)).find((item) => item.key === 'application.answer_vault.sexual_orientation')).toBeUndefined();
+    expect(
+      (await profileService.listFacts(user.userId)).find(
+        (item) => item.key === 'application.answer_vault.sexual_orientation',
+      ),
+    ).toBeUndefined();
   });
 
   it('serves a no-store shadow matching page without embedding secrets', async () => {

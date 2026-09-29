@@ -15,7 +15,12 @@ export const answerTopicSchema = z.enum(answerTopics);
 export type AnswerTopic = z.infer<typeof answerTopicSchema>;
 
 const sensitiveTopics: ReadonlySet<AnswerTopic> = new Set([
-  'sexual_orientation', 'disability_status', 'ethnicity', 'gender_identity', 'religion', 'marital_status',
+  'sexual_orientation',
+  'disability_status',
+  'ethnicity',
+  'gender_identity',
+  'religion',
+  'marital_status',
 ]);
 
 export function answerTopicIsSensitive(topic: AnswerTopic): boolean {
