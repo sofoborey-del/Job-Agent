@@ -30,6 +30,12 @@ The architecture specification is authoritative. If implementation and specifica
   configuration versions, tracker state, and an append-only tracker history.
 - Idempotent ingestion and matching, with deduplication by canonical URL and by an employer, title,
   location and closing-date fingerprint.
+- A hosted `discovery_only` mode running on an Oracle Cloud VM: no published port except a
+  loopback relay for an SSH forward, no fake-ATS routes, no inbound Discord handler, nightly
+  volume backups with a tested restore. See "The hosted discovery deployment" below.
+- A `LEADS_DISCOVERED` notification reporting that new leads arrived and how many, claiming nothing
+  about suitability, so an excerpt-only source is not silent. `JOB_MATCHED` remains the only
+  notification that asserts a match.
 - Transactional outbox with deduplicated Discord delivery, bounded retries, dead letters, quiet
   hours, and a global kill switch.
 - Signed, allowlisted, replay-safe Discord commands limited to workflow intent.
@@ -77,8 +83,13 @@ The architecture specification is authoritative. If implementation and specifica
   browser worker drives. No candidate-account access, no real
   employer form, and no submission capability outside that fake target.
 
-`pnpm check` passes 587 tests (the Playwright tests skip themselves on a machine where
-`pnpm browser:install` has not been run). Re-run it before and after material changes. On this Windows machine, if pnpm stalls while linking dependencies, use `pnpm install --package-import-method=copy`.
+`pnpm check` passes 601 tests across 52 files (the Playwright tests skip themselves on a machine
+where `pnpm browser:install` has not been run). It runs `lint`, `format:check`, `typecheck` and
+`test`; `format:check` was added on 2026-09-29 because unformatted code could otherwise be committed
+and then surface as a large unrelated diff the next time anyone ran `pnpm format`. Prettier ignores
+`.claude/`, so formatting never rewrites the user's permission rules. Re-run the check before and
+after material changes. On this Windows machine, if pnpm stalls while linking dependencies, use
+`pnpm install --package-import-method=copy`.
 
 `pnpm` itself was absent from this machine on 2026-09-25 and was installed globally with
 `npm install -g pnpm@10`. `vitest.config.ts` raises the test and hook timeouts to 30s, because
@@ -136,9 +147,27 @@ Two gates are open and both need the user, not more code.
 
 On 2026-09-25 the user ran the shortlist-quality review and **rejected it**, on the grounds that
 scoring an advert summary while the real criteria sat in an unopened document was not good enough to
-sign off. That blocker has since been fixed (see "Criteria that live in a linked document" below) and
-the review needs redoing against the fix. The shortlist-quality line of the sign-off block is
-therefore still unsigned, and Phase 1B has **not** passed.
+sign off. The shortlist-quality line of the sign-off block is still unsigned and Phase 1B has **not**
+passed.
+
+**Re-examined on 2026-09-29, and the advice is still not to sign it.** The September blocker had been
+addressed at the document level — criteria documents were being read, and five of the ten real
+adverts held 6,000 to 19,500 characters of criteria text — but none of it reached a decision, for
+three separate reasons. All three are now fixed; see "Criteria read, but never reaching a decision"
+below. Measured with `pnpm criteria:report`, extraction went from 25 per advert of duties and form
+labels to 100 genuine criteria across the ten.
+
+That is not enough to sign the gate. 86 of the 100 criteria still resolve to `unknown`, because the
+agent cannot evidence prose such as "significant experience within Organisational Development"
+against a structured profile. Scores therefore sit between 37 and 54 and do not separate the adverts.
+Every rejection is a hard gate — four adverts are `restricted_to_internal_candidates` — and not one
+advert is rejected on score. So the shortlist is not discarding anything, but neither is it ranking,
+and signing it off would certify a ranking that does not exist.
+
+The decision this leaves is a design one, not a defect: either evidencing free-text criteria against
+the profile is worth attempting, or a score is the wrong interface and the tracker should group by
+hard gates passed and criteria coverage instead. `docs/criteria-extraction-review-2026-09-29.md`
+records the measurements and states the question in full.
 
 1. Shortlist-quality review — the synthetic corpus (`pnpm shadow:corpus`) and about ten real
    MyJobScotland adverts added through `/tracker`. Judge the **Criteria seen** column too, and decide
@@ -162,15 +191,21 @@ Two scripts were added because the runbook assumed capabilities the repository d
 `pnpm discord:register` (guild-scoped registration, guild resolved from `DISCORD_CHANNEL_ID`, so no
 sixth identifier is needed). The command definitions live in `scripts/discord-commands.mjs`.
 
-**What this does not prove.** The test message was a direct Discord API call. It did not exercise
-the outbox, the delivery dedupe key or quiet hours, so runbook section 7 — a real shortlist
-notification and the no-duplicate-on-re-score check — is still outstanding. Sections 8 and 9 are
-also outstanding and cannot be done until an interaction endpoint exists: Discord's HTTP
-interactions model requires a public HTTPS URL and will not call loopback. Runbook section 6b
-records the tunnel options; **no tunnel has been created and the user has not decided.**
+**What this did not prove, and what has since been proven.** The test message was a direct Discord
+API call: it did not exercise the outbox, the delivery dedupe key or quiet hours. Runbook section 7
+is now satisfied. On 2026-09-29 ten real `JOB_MATCHED` notifications were delivered from the hosted
+deployment through the outbox, none retried and none dead-lettered, and the outbox holds one row per
+distinct dedupe key with a unique index enforcing it. Quiet hours is evidenced by the 2026-09-26
+batch, created at 00:02Z and held until 07:58Z. Repeated discovery produced no duplicate jobs and no
+duplicate events: a scheduled run fetched 25 adverts and created 5, recognising the other 20.
 
-`AGENT_USER_ID` is still empty, so onboarding has not been completed. That blocks slash commands,
-the scheduler and the shortlist-quality review, and is the real bottleneck rather than Discord.
+Sections 8 and 9 — refusing a different Discord user, and a harmless replayed command — remain
+outstanding. They need an inbound interaction endpoint, which requires a public HTTPS URL that will
+not reach loopback. Note that `discovery_only` disables the inbound command handler entirely, so
+those two checks can only ever be exercised against a local run, not against the hosted deployment.
+
+`AGENT_USER_ID` is set and onboarding is complete; the profile, an approved CV and 60 tracked jobs
+exist. The earlier note that this was the bottleneck is out of date.
 
 **Phase 2 exit gate.** Follow `docs/runbooks/phase-2-fake-ats.md`: run one practice application on
 the fake ATS end to end, rehearse at least the validation-loop and ambiguous-outcome cases, and fill
@@ -185,6 +220,70 @@ their local `.env`.
 
 Do not begin Phase 3 — a single real, supervised employer adapter — without a new explicit
 instruction from the user, and not before both sign-off blocks above are filled in.
+
+### The hosted discovery deployment (added 2026-09-29)
+
+The agent runs on an Oracle Cloud VM: `VM.Standard.A1.Flex`, 1 OCPU / 6 GB, aarch64, Oracle Linux 9,
+uk-london-1. Discovery and notifications only. The Windows scheduled task is **disabled**, so there
+is one writer; re-enabling it while the host runs would give two schedulers, two Adzuna callers and
+duplicate Discord messages against separate databases.
+
+Project at `/home/opc/job-agent`, secrets in `.env.hosted` (0600, excluded from Git and from the
+image build context). Two containers from `compose.discovery.yml`. The agent is read-only rootfs,
+all capabilities dropped, no-new-privileges, unprivileged user, pids-capped and healthchecked.
+
+**Reaching the screens.** The control plane refuses to bind to anything but loopback, and that
+refusal is worth more than the convenience — which also means a published Docker port cannot reach
+it, because Docker forwards to the container's bridge address. A small relay runs inside the agent's
+network namespace and forwards to `127.0.0.1`. The single published port is `127.0.0.1:3310` on the
+host, so the only ways in are a shell on the host and an SSH forward. Verified: 3210 is refused on
+the host, both ports time out from the internet, and `/v1/sources` still answers 401 without a token.
+Closing that door without disturbing discovery is
+`docker compose -f compose.discovery.yml stop tracker-access`.
+
+**Backups.** `job-agent-backup.timer` runs `/home/opc/backup-agent-volume.sh` nightly at about 03:30.
+It stops the container before copying, because PGlite must not be copied while open, and keeps seven
+days. Restoring has been tested: the archive was extracted into a throwaway volume and opened.
+
+**What this deployment cannot do.** Adzuna is the only source `discovery_only` permits and it returns
+excerpts, which can never raise a `JOB_MATCHED` alert. Without something else the host would find
+leads in silence and only ever message on failure, so `LEADS_DISCOVERED` was added: it reports that
+leads arrived and how many, claims nothing about suitability, and is deduped by discovery run. There
+is also no cross-platform malware scanner in the image, so no source requiring document scanning may
+be enabled there.
+
+### Criteria read, but never reaching a decision (added 2026-09-29)
+
+Three separate defects, each enough on its own to make the shortlist-quality review meaningless.
+
+**1. A matcher change re-scored nothing.** `listAwaitingMatch` selected only on `needs_rematch`,
+which ingestion sets when an advert's content changes and nothing sets when the matcher changes. The
+ten real adverts sat on `shadow-1.3.0` from 26 to 29 September, through two matcher releases, so the
+criteria work of `55d5069` never reached them and the tracker displayed scores no current code would
+produce. **The claim in that commit that bumping `MATCHER_VERSION` "reaches already-scored jobs" was
+wrong.** A job is now due when an ingest flagged it _or_ when the matcher that last scored it differs
+from the one running; callers passing no version keep the previous behaviour.
+
+**2. Duties were read as the candidate's requirements.** A role profile puts duties and criteria in
+one document under headings no fixed list catches. Requiring a recognised heading admitted
+`"To supervise a team of clerical admin staff"` — a duty, which an applicant can neither have nor
+lack — and `"Job Family/ Grade/Level:"`, a form label. Worse, the extractor caps at 25 criteria and
+the numbered duties came first, so the criteria table at the end of the document was never reached.
+Section tracking is now a negative gate only, and a line is taken on what it says about the
+candidate.
+
+**3. A heading absorbed the line after it.** Reflowing joined `"Criteria Essential Desirable
+Evidence"` to its first criterion, dragging the word "Desirable" into it so the criterion was
+discarded as optional. That alone cost eight of nine criteria on one advert.
+
+Measured with `pnpm criteria:report` on the ten real adverts: 100 criteria extracted, up from 25 per
+advert of duties and labels, and 5 evidenced where none had been. `MATCHER_VERSION` is
+`shadow-1.6.0`.
+
+**Deliberately not changed.** 86 of 100 criteria remain `unknown`, and the 25-criterion cap now
+truncates one genuine specification. Both change scores, and scoring thresholds and weightings are to
+be decided through versioned configuration rather than tuned in passing. Do not quietly adjust either
+to make the band look wider.
 
 ### The Phase 2 screen walkthrough, and two defects it exposed (2026-09-26)
 
@@ -562,15 +661,15 @@ Treat phases as gates, not merely labels. Do not begin a later phase until the p
 
 ### Status at this handoff
 
-| Stage                                                     | Status                            | Meaning                                                                                                                                                                                                                                                                                 |
-| --------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 0 — architecture and threat model                   | Complete                          | The implementation specification exists and the standalone boundary is established.                                                                                                                                                                                                     |
-| Phase 1A — profile, manual discovery, and shadow matching | Complete                          | The encrypted profile/CV workflow and one-URL MyJobScotland shadow check work locally.                                                                                                                                                                                                  |
-| Phase 1B — scheduled discovery, tracker, and Discord      | Built, awaiting user sign-off     | Code and tests are in place. The user rejected the shortlist-quality review on 2026-09-25 over unread criteria documents; that is now fixed and the review must be redone. A live Discord check is also still outstanding.                                                              |
-| Phase 2 — fake ATS browser framework                      | Built, partially signed off       | The fake-ATS walkthrough was run on 2026-09-26 and every mechanism held; two UI/route defects were found and fixed. The sign-off block in `docs/runbooks/phase-2-fake-ats.md` records what was and was not observed by the user, and states why this is not yet an MVP completion gate. |
-| Phase 3 — one supervised real adapter                     | Adapter built, execution disabled | The MyJobScotland/TalentLink adapter, validator, mapper and resolver exist and are tested against synthetic fixtures only. Live prefill is off: no reviewed permission for browser automation. See docs/real-application-pilot.md. Approval is required for every real submission.      |
-| Phase 4 — constrained auto-submit                         | Not started                       | Requires measured quality and explicit opt-in.                                                                                                                                                                                                                                          |
-| Phase 5 — read-only application email                     | Not started                       | Reading/classification only; sending remains disabled.                                                                                                                                                                                                                                  |
+| Stage                                                     | Status                                   | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 0 — architecture and threat model                   | Complete                                 | The implementation specification exists and the standalone boundary is established.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Phase 1A — profile, manual discovery, and shadow matching | Complete                                 | The encrypted profile/CV workflow and one-URL MyJobScotland shadow check work locally.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Phase 1B — scheduled discovery, tracker, and Discord      | Built and hosted, awaiting user sign-off | Running on an Oracle VM since 2026-09-29, discovery only. Discord delivery is proven through the outbox: 10 real notifications delivered, none retried or dead-lettered, no duplicates on repeated discovery. The shortlist-quality line is **still unsigned**: three defects found on 2026-09-29 meant criteria never reached a decision, and although all three are fixed, 86 of 100 criteria remain unevidenced so the shortlist does not rank. Runbook sections 8 and 9 remain outstanding and cannot be exercised against the hosted deployment. |
+| Phase 2 — fake ATS browser framework                      | Built, partially signed off              | The fake-ATS walkthrough was run on 2026-09-26 and every mechanism held; two UI/route defects were found and fixed. The sign-off block in `docs/runbooks/phase-2-fake-ats.md` records what was and was not observed by the user, and states why this is not yet an MVP completion gate.                                                                                                                                                                                                                                                               |
+| Phase 3 — one supervised real adapter                     | Adapter built, execution disabled        | The MyJobScotland/TalentLink adapter, validator, mapper and resolver exist and are tested against synthetic fixtures only. Live prefill is off: no reviewed permission for browser automation. See docs/real-application-pilot.md. Approval is required for every real submission.                                                                                                                                                                                                                                                                    |
+| Phase 4 — constrained auto-submit                         | Not started                              | Requires measured quality and explicit opt-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Phase 5 — read-only application email                     | Not started                              | Reading/classification only; sending remains disabled.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ### Phase 1B — complete discovery-only operation
 
