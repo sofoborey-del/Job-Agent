@@ -90,7 +90,16 @@ export interface TrackingStore {
   get(userId: string, jobId: string): Promise<TrackingRecord | null>;
   list(filter: TrackerFilter): Promise<TrackedJobPage>;
   detail(userId: string, jobId: string): Promise<TrackedJobDetail | null>;
-  listAwaitingMatch(userId: string, limit: number): Promise<JobAwaitingMatch[]>;
+  /**
+   * Jobs due for scoring: those an ingest flagged, and those last scored by a different matcher.
+   * The second clause matters because a matcher change alters the decision for every job, and
+   * nothing else marks them. Without it a new matcher version silently re-scored nothing.
+   */
+  listAwaitingMatch(
+    userId: string,
+    limit: number,
+    matcherVersion?: string,
+  ): Promise<JobAwaitingMatch[]>;
   /** One tracked job prepared for matching, whether or not it is currently flagged for re-match. */
   getForMatching(userId: string, jobId: string): Promise<JobAwaitingMatch | null>;
   changeReviewStatus(input: {

@@ -30,8 +30,8 @@ mandatory criteria visible" for every real advert.
 
 The cause is a mistaken assumption recorded in the commit that introduced `shadow-1.5.0`: it states
 that bumping the matcher version "reaches already-scored jobs". It does not. Jobs are selected for
-re-matching on a `needs_rematch` flag, which is set when an advert's *content* changes and never
-when the *matcher* changes. A version bump therefore re-scores nothing. **This is still unfixed**;
+re-matching on a `needs_rematch` flag, which is set when an advert's _content_ changes and never
+when the _matcher_ changes. A version bump therefore re-scores nothing. **This is still unfixed**;
 the ten adverts were re-scored by setting the flag manually.
 
 **2. The extractor was reading the post's duties as the candidate's requirements.** A council role
@@ -63,11 +63,11 @@ what the post does. A heading no longer absorbs the following line.
 
 Measured with the repository's own `pnpm criteria:report` against the same ten real adverts:
 
-| Measure | Before | After |
-| --- | --- | --- |
+| Measure                                  | Before                                           | After                 |
+| ---------------------------------------- | ------------------------------------------------ | --------------------- |
 | Requirements extracted across 10 adverts | 25 per advert, capped, largely duties and labels | 100, genuine criteria |
-| Criteria evidenced against the profile | 0 | 5 |
-| Worst case | 1 criterion on a 9,916-character specification | 8 |
+| Criteria evidenced against the profile   | 0                                                | 5                     |
+| Worst case                               | 1 criterion on a 9,916-character specification   | 8                     |
 
 Those figures cover all ten adverts. The deployed re-score covers the nine that are eligible for
 re-matching, giving 81 criteria of which 4 are evidenced; the difference is the expired advert.

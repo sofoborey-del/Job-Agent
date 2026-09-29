@@ -440,12 +440,10 @@ export function buildServer(options: BuildServerOptions): FastifyInstance {
       if (!userId.success) return reply.code(400).send({ error: 'invalid_user_id' });
       const reviewed = await reviewedHistoryTexts(options.profileService, userId.data);
       if (reviewed === null)
-        return reply
-          .code(409)
-          .send({
-            error: 'reviewed_cv_sections_missing',
-            message: 'Review and approve your CV sections first.',
-          });
+        return reply.code(409).send({
+          error: 'reviewed_cv_sections_missing',
+          message: 'Review and approve your CV sections first.',
+        });
       const draft = draftHistoryFromReviewedCv(
         reviewed.employment.value as string,
         reviewed.education.value as string,
@@ -465,12 +463,10 @@ export function buildServer(options: BuildServerOptions): FastifyInstance {
         return reply.code(400).send({ error: 'invalid_request' });
       const reviewed = await reviewedHistoryTexts(options.profileService, userId.data);
       if (reviewed?.sourceRevision !== body.data.sourceRevision) {
-        return reply
-          .code(409)
-          .send({
-            error: 'cv_review_changed',
-            message: 'The reviewed CV changed. Reload and check the draft again.',
-          });
+        return reply.code(409).send({
+          error: 'cv_review_changed',
+          message: 'The reviewed CV changed. Reload and check the draft again.',
+        });
       }
       const entries = [
         ['employment.history', body.data.employment],
@@ -491,14 +487,12 @@ export function buildServer(options: BuildServerOptions): FastifyInstance {
         });
         updated.push(key);
       }
-      return reply
-        .header('cache-control', 'no-store')
-        .send({
-          saved: true,
-          updated,
-          employmentCount: body.data.employment.length,
-          educationCount: body.data.education.length,
-        });
+      return reply.header('cache-control', 'no-store').send({
+        saved: true,
+        updated,
+        employmentCount: body.data.employment.length,
+        educationCount: body.data.education.length,
+      });
     },
   );
 

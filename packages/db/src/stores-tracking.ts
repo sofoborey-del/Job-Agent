@@ -326,18 +326,29 @@ export class SqlTrackingStore implements TrackingStore {
     };
   }
 
-  async listAwaitingMatch(userId: string, limit: number): Promise<JobAwaitingMatch[]> {
+  async listAwaitingMatch(
+    userId: string,
+    limit: number,
+    matcherVersion?: string,
+  ): Promise<JobAwaitingMatch[]> {
+    // A job is due either because an ingest flagged it, or because the matcher that last scored it
+    // is not the matcher running now. Only the first was checked before, so changing the matcher
+    // re-scored nothing at all and old decisions stayed on the tracker indefinitely.
     const result = await this.db.query(
       `SELECT ${awaitingColumns}
          FROM job_tracking t
          JOIN jobs j ON j.id = t.job_id
          JOIN companies c ON c.id = j.company_id
+         LEFT JOIN match_runs m ON m.id = t.last_match_run_id
         WHERE t.user_id = $1
-          AND t.needs_rematch
+          AND (
+            t.needs_rematch
+            OR ($3::text IS NOT NULL AND (m.matcher_version IS NULL OR m.matcher_version <> $3))
+          )
           AND t.lifecycle_status NOT IN ('closed', 'expired', 'duplicate')
         ORDER BY t.last_seen_at DESC
         LIMIT $2`,
-      [userId, limit],
+      [userId, limit, matcherVersion ?? null],
     );
     const entries: JobAwaitingMatch[] = [];
     for (const row of result.rows) entries.push(await this.awaitingFromRow(row));

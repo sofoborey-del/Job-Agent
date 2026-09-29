@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
     "api": "pnpm build && node --env-file=.env apps/api/dist/index.js",
     "db:migrate": "pnpm build && node --env-file=.env apps/api/dist/migrate.js",
     "demo": "pnpm build && node apps/demo/dist/index.js",

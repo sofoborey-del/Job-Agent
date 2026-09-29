@@ -94,6 +94,7 @@ export class JobMatchService {
     const awaiting = await this.options.stores.tracking.listAwaitingMatch(
       this.options.userId,
       input.limit ?? 50,
+      MATCHER_VERSION,
     );
     if (awaiting.length === 0) return summary;
 
