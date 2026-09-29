@@ -153,3 +153,70 @@ describe('a criterion the matcher cannot judge', () => {
     expect(result.decision.action).not.toBe('auto_apply');
   });
 });
+
+/**
+ * A council role profile as pdf.js yields it: a header block of form labels, numbered duties that
+ * describe the post, a repeated page header, and only then the criteria table. Modelled on the
+ * shape of a real MyJobScotland profile; the wording is invented.
+ *
+ * Before the duty and label filters, the 25-slot cap filled with duties before reaching the
+ * criteria table, so an advert's real requirements were never seen at all.
+ */
+const councilProfile = [
+  'Role Profile',
+  'Job Family/ Grade/Level:',
+  'Person Specification Job title: Senior Administrative Officer',
+  'OFFICIAL V5.0 March 2021',
+  'Main Duties and Responsibilities',
+  '1. To supervise a team of clerical admin staff to support operational delivery.',
+  '2. To supervise, allocate and review the work of the admin team.',
+  '3. Responsible for maintaining accurate records across the service.',
+  'OFFICIAL V5.0 March 2021',
+  'Criteria Essential Desirable Evidence',
+  'Substantial experience in an administrative role.',
+  'Experience of advising on conditions of service, policies and procedures.',
+  'Able to demonstrate career progression and development within administration.',
+  'Other appropriate qualification desirable.',
+].join('\n');
+
+describe('separating what the candidate brings from what the post does', () => {
+  const extracted = extractMandatoryRequirements(councilProfile);
+
+  it('keeps the criteria from the table', () => {
+    expect(
+      extracted.some((line) => line.includes('Substantial experience in an administrative')),
+    ).toBe(true);
+    expect(extracted.some((line) => line.includes('advising on conditions of service'))).toBe(true);
+    expect(extracted.some((line) => line.includes('demonstrate career progression'))).toBe(true);
+  });
+
+  it('excludes duties of the post, which the applicant cannot have or lack', () => {
+    expect(extracted.some((line) => line.includes('supervise a team of clerical'))).toBe(false);
+    expect(extracted.some((line) => line.includes('allocate and review the work'))).toBe(false);
+    expect(extracted.some((line) => line.includes('Responsible for maintaining accurate'))).toBe(
+      false,
+    );
+  });
+
+  it('excludes form labels from the profile header block', () => {
+    expect(extracted.some((line) => line.trim().endsWith(':'))).toBe(false);
+    expect(extracted).not.toContain('Job Family/ Grade/Level:');
+  });
+
+  it('still excludes the repeated page header and anything marked desirable', () => {
+    expect(extracted.some((line) => line.includes('OFFICIAL V5.0'))).toBe(false);
+    expect(extracted.some((line) => /desirable/i.test(line))).toBe(false);
+  });
+
+  /**
+   * A word-boundary regression. The wording test is anchored with \b, and a mangled escape once
+   * turned every alternative into one that could never match, silently reducing a nine-criterion
+   * profile to one. Asserting a criterion that only the wording test can catch pins it.
+   */
+  it('matches a criterion on its opening word alone', () => {
+    const kept = extractMandatoryRequirements(
+      ['Criteria Essential Desirable Evidence', 'Substantial experience in an HR role.'].join('\n'),
+    );
+    expect(kept.some((line) => line.includes('Substantial experience in an HR role'))).toBe(true);
+  });
+});

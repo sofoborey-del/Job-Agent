@@ -57,7 +57,7 @@ const stopWords = new Set([
  * 1.5.0: criteria written as bullets in a PDF role profile are extracted, and a criterion the
  * matcher cannot judge either way no longer counts as uncovered.
  */
-export const MATCHER_VERSION = 'shadow-1.5.0';
+export const MATCHER_VERSION = 'shadow-1.6.0';
 
 export type ShadowJob = {
   id: string;
@@ -209,6 +209,10 @@ const bulletMark = /^[•*‣◦⁃∙\-–—−]\s*/;
  */
 export function reflowSpecificationLines(text: string): string[] {
   const output: string[] = [];
+  // A heading never absorbs the line after it. A criteria table is headed "Criteria Essential
+  // Desirable Evidence", and joining that onto the first criterion dragged the word "Desirable"
+  // into it, so a genuine criterion was discarded as optional.
+  let previousWasHeading = false;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (line === '') continue;
@@ -216,20 +220,49 @@ export function reflowSpecificationLines(text: string): string[] {
     const isHeading =
       /^[A-Z][A-Za-z0-9 /&'(),-]{2,60}$/.test(line) && line.split(/\s+/).length <= 8;
     const startsNew =
-      previous === undefined || bulletMark.test(line) || /[.!?:;]$/.test(previous) || isHeading;
+      previous === undefined ||
+      bulletMark.test(line) ||
+      /[.!?:;]$/.test(previous) ||
+      isHeading ||
+      previousWasHeading;
     if (startsNew) output.push(line.replace(bulletMark, ''));
     else output[output.length - 1] = `${previous} ${line}`;
+    if (startsNew) previousWasHeading = isHeading;
   }
   return output.map((line) => line.replace(/\s+/g, ' ').trim()).filter((line) => line !== '');
 }
 
 /** Headings after which bulleted lines state what the candidate must bring. */
 const criteriaHeading =
-  /^(person\s+specification|requirements?|qualifications?|experience|knowledge|technical\s+knowledge|skills|essential)\b/i;
+  /^(person\s+specification|requirements?|qualifications?|experience|knowledge|technical\s+knowledge|skills|essential|criteria|education|attributes|competenc|aptitude|training)\b/i;
 
 /** Headings that end a criteria section: what follows describes the post, not the candidate. */
 const nonCriteriaHeading =
-  /^(interdependenc|condition|company\s+overview|role\s+details|role\s+purpose|about\s|our\s+values|benefits|how\s+to\s+apply|main\s+duties|key\s+responsibilit|job\s+purpose|personal\s+attributes|behaviour|equal\s+opportunit)/i;
+  /^(interdependenc|condition|company\s+overview|role\s+details|role\s+purpose|about\s|our\s+values|benefits|how\s+to\s+apply|main\s+duties|key\s+responsibilit|job\s+purpose|personal\s+attributes|behaviour|equal\s+opportunit|accountabilit|key\s+activit|principal\s+(?:duties|accountabilit)|duties\s+and\s+responsibilit|main\s+purpose|job\s+description|decision\s+making|key\s+contacts|working\s+relationship|organisation(?:al)?\s+chart|scope|dimensions|resources|health\s+and\s+safety|role\s+summary|summary\s+of\s+(?:role|post))/i;
+
+/**
+ * Wording that states what the post does, not what the applicant must bring.
+ *
+ * A role profile puts duties and criteria in the same document, often under headings this code
+ * cannot tell apart, so the sentence itself has to be read. "To supervise a team of clerical admin
+ * staff" is the job; it is not a thing the applicant either has or lacks, and counting it as a
+ * criterion produced adverts whose requirements were almost entirely unknowable.
+ */
+const dutyWording =
+  /^(?:to\s+\w|responsible\s+for\b|the\s+post\s?holder\b|this\s+(?:post|role|job)\b|you\s+will\s+be\s+responsible\b|ensur(?:e|ing)\s+that\b|provid(?:e|ing)\s+(?:a|an|the)\b)/i;
+
+/**
+ * Wording that states something the applicant must bring.
+ *
+ * Being inside a person-specification section is not enough on its own: the section boundaries in a
+ * real profile are unreliable, and without a positive test every line between two headings was
+ * swept in. A criterion either opens with a candidate-directed verb or names the thing being asked
+ * for, so one of those has to be present.
+ */
+const candidateRequirementWording =
+  /^(?:have|has|hold|holds|possess|demonstrate|demonstrable|show|be|being|able|ability|experiences?|experienced|knowledge|skills?|understanding|awareness|educated|qualified|qualification|proven|significant|substantial|strong|excellent|good|sound|willing|committed|competent|proficient|fluent|numerate|literate)\b/i;
+const candidateRequirementPhrase =
+  /\b(?:experience\s+(?:of|in|within|with)|abilit(?:y|ies)\s+to|able\s+to|knowledge\s+of|understanding\s+of|awareness\s+of|skills?\s+(?:in|of)|qualifi(?:ed|cation)|educated\s+to|degree|hnc|hnd|svq|nvq|membership\s+of|registered\s+with|driving\s+licen[cs]e|pvg|disclosure\s+scotland)\b/i;
 
 /** A criterion the employer itself calls optional is not a mandatory requirement. */
 const desirableWording =
@@ -242,25 +275,35 @@ const desirableWording =
  * a "Person Specification" or "Requirements" heading. Only bullets inside such a section count, and
  * anything the employer marks desirable is excluded, so this cannot sweep in duties or boilerplate.
  */
-function bulletedCriteria(text: string): string[] {
+export function bulletedCriteria(text: string): string[] {
   const lines = reflowSpecificationLines(text);
   // A line repeated across the document is a running header or footer, not a criterion.
   const occurrences = new Map<string, number>();
   for (const line of lines) occurrences.set(line, (occurrences.get(line) ?? 0) + 1);
   const found: string[] = [];
-  let inSection = false;
+  // Section tracking is a negative gate, not a positive one. A real role profile labels its
+  // criteria table "Criteria Essential Desirable Evidence" or "Education, qualifications & training",
+  // and no fixed list of headings catches every employer's wording, so requiring a recognised
+  // heading discarded genuine criteria outright. What a line says about the candidate is the
+  // reliable signal, so a line is considered unless it sits under a heading known to describe the
+  // post rather than the person.
+  let suppressed = false;
   for (const line of lines) {
     const looksLikeHeading = line.length <= 70 && !/[.!?]$/.test(line);
     if (looksLikeHeading && nonCriteriaHeading.test(line)) {
-      inSection = false;
+      suppressed = true;
       continue;
     }
     if (looksLikeHeading && criteriaHeading.test(line)) {
-      inSection = true;
+      suppressed = false;
       continue;
     }
-    if (!inSection) continue;
+    if (suppressed) continue;
     if (line.length < 20 || line.length > 400) continue;
+    // A field label from the profile's header block, such as "Job Family/ Grade/Level:".
+    if (line.endsWith(':')) continue;
+    if (dutyWording.test(line)) continue;
+    if (!candidateRequirementWording.test(line) && !candidateRequirementPhrase.test(line)) continue;
     if (desirableWording.test(line)) continue;
     if ((occurrences.get(line) ?? 0) > 1) continue;
     found.push(line);
