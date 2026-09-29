@@ -48,6 +48,11 @@ const host = process.env.API_HOST ?? '127.0.0.1';
 if (!['127.0.0.1', 'localhost', '::1'].includes(host)) {
   throw new Error('The onboarding API is local-only in this phase');
 }
+const deploymentMode = process.env.AGENT_DEPLOYMENT_MODE ?? 'local';
+if (!['local', 'discovery_only'].includes(deploymentMode)) {
+  throw new Error('AGENT_DEPLOYMENT_MODE must be local or discovery_only');
+}
+const discoveryOnly = deploymentMode === 'discovery_only';
 const port = Number(process.env.API_PORT ?? '3210');
 if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error('API_PORT is invalid');
 
@@ -107,6 +112,14 @@ for (const definition of defaultSourceDefinitions) {
   const existing = await stores.sources.getByKey(definition.key);
   if (existing === null) await stores.sources.upsertDefinition(definition, new Date());
 }
+if (discoveryOnly) {
+  const unsupportedSources = (await stores.sources.list()).filter(
+    (source) => source.enabled && source.sourceKey !== 'adzuna_gb_search',
+  );
+  if (unsupportedSources.length > 0) {
+    throw new Error('discovery_only mode permits only the reviewed Adzuna text source');
+  }
+}
 
 const discordBotToken = process.env.DISCORD_BOT_TOKEN ?? '';
 const discordChannelId = process.env.DISCORD_CHANNEL_ID ?? '';
@@ -134,8 +147,11 @@ const publisher = new OutboxPublisher({
 
 const agentUserId = process.env.AGENT_USER_ID ?? '';
 const discordConfigured =
-  discordPublicKey !== '' && discordAllowedUserId !== '' && agentUserId !== '';
+  !discoveryOnly && discordPublicKey !== '' && discordAllowedUserId !== '' && agentUserId !== '';
 const schedulerEnabled = (process.env.DISCOVERY_SCHEDULER_ENABLED ?? 'false') === 'true';
+if (discoveryOnly && !schedulerEnabled) {
+  throw new Error('discovery_only mode requires DISCOVERY_SCHEDULER_ENABLED=true');
+}
 
 // The scheduler is created whenever it is switched on, even with a missing or malformed
 // AGENT_USER_ID, so that its status can explain the problem. It performs no discovery, matching or
@@ -224,7 +240,7 @@ const app = buildServer({
   cvProcessingService,
   adminToken: requiredEnvironment('PROFILE_ADMIN_TOKEN'),
   logger: true,
-  applications,
+  ...(discoveryOnly ? {} : { applications }),
   tracking: {
     stores,
     adzunaCredentials: {

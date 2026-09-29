@@ -12,6 +12,7 @@ import { newCorrelationId, silentLogger, type StructuredLogger } from '@job-agen
 import { discoveryPermitted, PolicyRateLimiter, type SitePolicy } from '@job-agent/policy';
 
 import { checkOfficialUrl, type LeadCompletionRefusal } from './lead-completion.js';
+import { planAdzunaSearches } from './adzuna-search-plan.js';
 import { extractJobRequirements } from './requirements.js';
 import type { TrackingStores } from './ports.js';
 import {
@@ -23,6 +24,9 @@ import {
 
 const MAX_CONSECUTIVE_FAILURES = 4;
 const CIRCUIT_OPEN_MINUTES = 60;
+// Eight official-API calls per manual run, at most once an hour, remain below Adzuna's published
+// daily request allowance even if the person presses the button repeatedly all day.
+const ADZUNA_MANUAL_COOLDOWN_MS = 60 * 60_000;
 
 export type SitePolicyLookup = (domain: string) => Promise<SitePolicy | null>;
 
@@ -107,6 +111,14 @@ export class DiscoveryService {
     if (source.circuitOpenUntil !== null && new Date(source.circuitOpenUntil) > now) {
       return empty('skipped', 'circuit_open');
     }
+    if (
+      input.trigger === 'manual' &&
+      source.adapterType === 'public_api' &&
+      source.lastSuccessAt !== null &&
+      now.getTime() - new Date(source.lastSuccessAt).getTime() < ADZUNA_MANUAL_COOLDOWN_MS
+    ) {
+      return empty('skipped', 'search_recently_completed');
+    }
 
     const policy = await this.options.sitePolicyFor(source.sitePolicyDomain);
     if (policy === null) return empty('skipped', 'site_policy_missing');
@@ -156,16 +168,29 @@ export class DiscoveryService {
       const apiVacancies =
         source.adapterType === 'public_api'
           ? await (async () => {
-              await this.sleep(limiter.delayFor(Date.now()));
-              limiter.record();
-              return fetchAdzunaVacancies({
-                credentials: credentials ?? { appId: '', appKey: '' },
-                what: 'customer service',
-                where: 'Glasgow',
-                minimumAnnualSalary: 25_000,
-                maxItems: source.maxItemsPerRun,
-                ...(this.options.fetcher === undefined ? {} : { fetcher: this.options.fetcher }),
-              });
+              const intervalMs = scheduleIntervalOrMinimum(source.scheduleIntervalSeconds) * 1000;
+              const slot = Math.floor(now.getTime() / intervalMs);
+              const searches = planAdzunaSearches(source.maxItemsPerRun, slot);
+              const found = new Map<
+                string,
+                Awaited<ReturnType<typeof fetchAdzunaVacancies>>[number]
+              >();
+              for (const search of searches) {
+                await this.sleep(limiter.delayFor(Date.now()));
+                limiter.record();
+                const vacancies = await fetchAdzunaVacancies({
+                  credentials: credentials ?? { appId: '', appKey: '' },
+                  what: search.what,
+                  ...(search.where === undefined ? {} : { where: search.where }),
+                  minimumAnnualSalary: 25_000,
+                  maxItems: search.maxItems,
+                  ...(this.options.fetcher === undefined ? {} : { fetcher: this.options.fetcher }),
+                });
+                for (const vacancy of vacancies) {
+                  if (!found.has(vacancy.externalId)) found.set(vacancy.externalId, vacancy);
+                }
+              }
+              return [...found.values()];
             })()
           : null;
       const candidates =

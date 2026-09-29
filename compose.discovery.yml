@@ -1,0 +1,50 @@
+# Outbound-only deployment. There are deliberately no published ports.
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.discovery
+    env_file:
+      - .env.hosted
+    environment:
+      AGENT_DEPLOYMENT_MODE: discovery_only
+      DB_MODE: embedded
+      PGLITE_DATA_DIR: /data/pglite
+      ARTIFACT_DATA_DIR: /data/artifacts
+      API_HOST: 127.0.0.1
+      API_PORT: 3210
+      DISCOVERY_SCHEDULER_ENABLED: 'true'
+      FAKE_ATS_ORIGIN: http://127.0.0.1:3311
+    volumes:
+      - agent-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    restart: unless-stopped
+    # Logs can name job titles, and the host disk is small. Bound them so a long-running
+    # container cannot fill the volume group.
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3210/health').then(async r => { const h = await r.json(); if (!r.ok || !h.schedulerReady || !h.notificationsConfigured || h.browserAutomation !== false || h.autoSubmit !== false) process.exit(1) }).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  agent-data:
+    name: job-application-agent-data

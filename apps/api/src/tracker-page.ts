@@ -14,8 +14,8 @@ export const trackerPageHtml = String.raw`<!doctype html>
     .intro { color:#4d5e57; font-size:1.05rem; max-width:720px; line-height:1.6; }
     .card { background:#fff; border:1px solid #dce4de; border-radius:20px; padding:clamp(18px,3vw,28px); margin-top:20px; box-shadow:0 16px 42px rgba(29,54,45,.08); }
     label { display:block; font-weight:750; margin:12px 0 6px; font-size:.92rem; }
-    input, select { width:100%; border:1px solid #b7c6bf; border-radius:11px; padding:11px 12px; font:inherit; color:inherit; background:#fff; }
-    input:focus, select:focus { outline:3px solid #b8e4d7; border-color:#14705a; }
+    input, select, textarea { width:100%; border:1px solid #b7c6bf; border-radius:11px; padding:11px 12px; font:inherit; color:inherit; background:#fff; }
+    input:focus, select:focus, textarea:focus { outline:3px solid #b8e4d7; border-color:#14705a; }
     button { border:0; border-radius:999px; padding:11px 18px; background:#18322b; color:white; font:inherit; font-weight:800; cursor:pointer; }
     button.ghost { background:#e9f5ef; color:#0d4a3b; }
     button.quiet { background:#f0ede6; color:#3d4b45; }
@@ -44,7 +44,7 @@ export const trackerPageHtml = String.raw`<!doctype html>
 <main>
   <div class="eyebrow">Discovery and shortlist only</div>
   <h1>Your job shortlist</h1>
-  <p class="intro">Everything here was found by reading public job adverts and comparing them with facts you approved. Nothing has been applied for, and the agent cannot log in to a jobs site or send anything to an employer.</p>
+  <p class="intro">This tracker includes public adverts and excerpt-only search leads. Excerpts have not been checked against the full job requirements. Nothing has been applied for, and the agent cannot log in to a jobs site or send anything to an employer.</p>
   <p><a href="/profile-history">Complete employment and education history from your approved CV</a></p>
   <p><a href="/answer-vault">Review or add reusable application answers</a></p>
   <p><a href="/leaving-reasons">Link your recorded reasons for leaving to the right roles</a></p>
@@ -62,10 +62,12 @@ export const trackerPageHtml = String.raw`<!doctype html>
     </div>
     <div class="actions">
       <button id="load" type="button">Show my jobs</button>
+      <button id="findJobs" class="ghost" type="button">Find jobs now</button>
       <button id="rescore" class="ghost" type="button">Score anything new</button>
       <button id="pause" class="quiet" type="button">Pause the agent</button>
       <button id="resume" class="quiet" type="button">Resume</button>
     </div>
+    <p class="muted">Find jobs now searches Adzuna for customer service, administration, insurance, fraud, compliance and financial-services roles around Glasgow, plus remote customer-service and admin leads across the UK. It uses your £25,000 salary floor and can run at most once an hour.</p>
     <p id="status" class="note" role="status" aria-live="polite">Enter your token and profile ID, then choose "Show my jobs".</p>
     <div id="counts" class="counts"></div>
     <div id="agentState" hidden></div>
@@ -91,7 +93,7 @@ export const trackerPageHtml = String.raw`<!doctype html>
         <label for="fStatus">Status</label>
         <select id="fStatus">
           <option value="">Any status</option>
-          <option value="shortlisted" selected>Shortlisted</option>
+          <option value="shortlisted">Shortlisted</option>
           <option value="discovered">New</option>
           <option value="reviewed">Reviewed</option>
           <option value="rejected">Rejected</option>
@@ -167,7 +169,7 @@ export const trackerPageHtml = String.raw`<!doctype html>
         <select id="fSort">
           <option value="score_desc">Best match first</option>
           <option value="score_asc">Lowest match first</option>
-          <option value="discovered_desc">Newest first</option>
+          <option value="discovered_desc" selected>Newest first</option>
           <option value="closing_soon">Closing soonest</option>
         </select>
       </div>
@@ -384,6 +386,74 @@ export const trackerPageHtml = String.raw`<!doctype html>
         row.append(input, go);
         incomplete.append(row, said);
         card.append(incomplete);
+
+        var pastedReview = document.createElement('details');
+        var pastedTitle = document.createElement('summary');
+        pastedTitle.textContent = 'Compare a full advert I copied';
+        pastedReview.append(pastedTitle);
+        var pastedHelp = document.createElement('p');
+        pastedHelp.className = 'muted';
+        pastedHelp.textContent = 'If the employer site cannot be read by the agent, paste its complete advert here. If the requirements are in a separate person-specification document, paste that too. This gives a tentative comparison only: the text is not saved, the lead is not upgraded, and nothing is sent to an employer.';
+        pastedReview.append(pastedHelp);
+        var advertLabel = document.createElement('label');
+        advertLabel.textContent = 'Full advert text';
+        var advertText = document.createElement('textarea');
+        advertText.rows = 9;
+        advertText.maxLength = 50000;
+        advertLabel.append(advertText);
+        var criteriaLabel = document.createElement('label');
+        criteriaLabel.textContent = 'Separate person specification or selection criteria (if there is one)';
+        var criteriaText = document.createElement('textarea');
+        criteriaText.rows = 5;
+        criteriaText.maxLength = 30000;
+        criteriaLabel.append(criteriaText);
+        var confirmLabel = document.createElement('label');
+        var confirmed = document.createElement('input');
+        confirmed.type = 'checkbox';
+        confirmed.style.width = 'auto';
+        confirmLabel.append(confirmed, document.createTextNode(' I copied the complete advert, not just the search-result excerpt.'));
+        var compare = document.createElement('button');
+        compare.type = 'button';
+        compare.className = 'ghost';
+        compare.textContent = 'Compare pasted advert';
+        var comparison = document.createElement('div');
+        compare.addEventListener('click', function () {
+          if (!confirmed.checked || advertText.value.trim().length < 300) {
+            comparison.textContent = 'Paste at least 300 characters of the complete advert and tick the confirmation first.';
+            return;
+          }
+          compare.disabled = true;
+          comparison.textContent = 'Comparing the text you supplied…';
+          request('/v1/tracker/:userId/jobs/' + job.jobId + '/pasted-advert-review', {
+            method: 'POST',
+            body: JSON.stringify({ advertText: advertText.value, criteriaText: criteriaText.value, confirmedComplete: true })
+          }).then(function (result) {
+            comparison.replaceChildren();
+            var intro = document.createElement('p');
+            intro.textContent = result.message;
+            comparison.append(intro);
+            var scoreLine = document.createElement('p');
+            scoreLine.textContent = result.tentativeScore === null
+              ? 'No mandatory criteria were found in the pasted text, so no useful score is shown.'
+              : 'Tentative fit score: ' + result.tentativeScore + '/100. Salary: ' + (salaryWords[result.salaryGate] || result.salaryGate) + '.';
+            comparison.append(scoreLine);
+            var list = document.createElement('ul');
+            (result.hardRejectReasons || []).forEach(function (reason) {
+              var item = document.createElement('li');
+              item.textContent = 'Eligibility concern: ' + reason.replace(/_/g, ' ');
+              list.append(item);
+            });
+            (result.requirements || []).forEach(function (requirement) {
+              var item = document.createElement('li');
+              item.textContent = (requirement.outcome === 'met' ? 'Profile evidence may support: ' : 'Check yourself: ') + requirement.text;
+              list.append(item);
+            });
+            comparison.append(list);
+          }).catch(function (error) { comparison.textContent = error.message; })
+            .finally(function () { compare.disabled = false; });
+        });
+        pastedReview.append(advertLabel, criteriaLabel, confirmLabel, compare, comparison);
+        card.append(pastedReview);
       }
 
       var prepare = document.createElement('button');
@@ -597,12 +667,12 @@ export const trackerPageHtml = String.raw`<!doctype html>
     });
   }
 
-  function loadJobs() {
+  function loadJobs(successMessage) {
     say('Loading your jobs…');
     request('/v1/tracker/:userId/jobs' + filterQuery(), {}).then(function (body) {
       renderCounts(body.counts);
       renderJobs(body);
-      say('Showing ' + body.jobs.length + ' of ' + body.total + ' job(s). Preparing does not submit an application.');
+      say(successMessage || 'Showing ' + body.jobs.length + ' of ' + body.total + ' job(s). Preparing does not submit an application.');
     }).catch(function (error) { say(error.message, true); });
   }
 
@@ -633,7 +703,7 @@ export const trackerPageHtml = String.raw`<!doctype html>
   }
 
   function loadSources() {
-    request('/v1/sources', {}).then(function (body) {
+    return request('/v1/sources', {}).then(function (body) {
       var select = el('fSource');
       select.replaceChildren();
       var any = document.createElement('option');
@@ -649,11 +719,47 @@ export const trackerPageHtml = String.raw`<!doctype html>
   }
 
   el('load').addEventListener('click', function () { loadSources(); loadAgentStatus(); loadJobs(); });
-  el('apply').addEventListener('click', loadJobs);
+  el('findJobs').addEventListener('click', function () {
+    var creds = credentials();
+    if (!creds) return;
+    var button = el('findJobs');
+    button.disabled = true;
+    say('Searching the reviewed Adzuna job feed. This only saves leads; it does not apply for anything.');
+    request('/v1/discovery/runs', {
+      method: 'POST', body: JSON.stringify({ userId: creds.profile, sourceKey: 'adzuna_gb_search' })
+    }).then(function (result) {
+      if (result.status === 'skipped') {
+        say(result.skipReason === 'search_recently_completed'
+          ? 'That search ran less than an hour ago. The agent will keep searching on its schedule; try this button later.'
+          : 'Search did not run: ' + (result.skipReason || 'the source is unavailable') + '. Check the agent status below.', true);
+        return;
+      }
+      if (result.status === 'failed') {
+        say('Search failed: ' + (result.errorCode || 'unknown error') + '. Try again later.', true);
+        return;
+      }
+      var message;
+      if (result.status === 'already_ran') {
+        message = 'This search already ran in the current time slot. No duplicate search was sent.';
+      } else {
+        var counts = result.counts || {};
+        message = 'Search finished: ' + (counts.created || 0) + ' new lead(s), ' +
+          (counts.duplicates || 0) + ' duplicate(s), ' + (counts.errors || 0) +
+          ' error(s). These excerpts are not confirmed matches; open the full advert before applying.';
+      }
+      el('fStatus').value = '';
+      el('fSort').value = 'discovered_desc';
+      loadSources().then(function () { el('fSource').value = 'adzuna_gb_search'; })
+        .finally(function () { loadJobs(message); });
+      loadAgentStatus();
+    }).catch(function (error) { say(error.message, true); })
+      .finally(function () { button.disabled = false; });
+  });
+  el('apply').addEventListener('click', function () { loadJobs(); });
   el('clear').addEventListener('click', function () {
     ['fMinScore','fMaxScore','fEmployer','fLocation','fMinSalary','fMaxSalary','fFrom','fTo','fClosing','fQuery'].forEach(function (id) { el(id).value = ''; });
     ['fStatus','fLifecycle','fSalaryGate','fSource'].forEach(function (id) { el(id).value = ''; });
-    el('fSort').value = 'score_desc';
+    el('fSort').value = 'discovered_desc';
     loadJobs();
   });
   el('rescore').addEventListener('click', function () {

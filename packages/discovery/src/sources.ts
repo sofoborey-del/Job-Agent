@@ -153,7 +153,7 @@ export const defaultSourceDefinitions: readonly SourceDefinition[] = [
     reviewedBy: 'system',
     reviewedAt: '2026-09-28T00:00:00.000Z',
     notes:
-      'Read-only search of the documented Adzuna API. Requires a free personal application key in .env. Returns an excerpt of each advert, never the full text, so results arrive as leads for you to open rather than as scored matches. Terms: https://developer.adzuna.com/docs/terms_of_service',
+      'Read-only searches of the documented Adzuna API across the applicant’s target role families. Requires a free personal application key in .env. Returns an excerpt of each advert, never the full text, so results arrive as leads for you to open rather than as scored matches. Terms: https://developer.adzuna.com/docs/terms_of_service',
   } satisfies Record<string, unknown>),
 ];
 

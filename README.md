@@ -78,6 +78,10 @@ job submission capability, and auto-submit remains disabled.
 
 MyJobScotland public-advert discovery is available, but real-site prefill and submission are disabled: the permission review was redone on 2026-09-28 and the blocker stands. What you get instead is [`/application-prep`](docs/runbooks/application-preparation.md), a per-job pack of grounded answers to copy into the employer's own form. No portal password is persisted. The local `/profile-history` page lets the applicant confirm structured rows drafted from an already-reviewed CV. The local `/answer-vault` page stores optional reusable answers encrypted in the profile; it does not yet fill them into any employer form. Vault values are excluded from matching and automatic form answers, are never sent to Discord, and can be removed through that page.
 
+On `/tracker`, **Find jobs now** runs the reviewed, read-only Adzuna search when that source is enabled. It looks for customer service, administration, insurance, fraud, compliance and financial services around Glasgow, plus remote customer-service and admin leads across the UK. The source's per-run result cap is spread across these eight searches; it is not eight times larger. Manual runs have a one-hour cooldown. Results are excerpt-only leads, not confirmed matches or applications. The button uses the same site-policy and duplicate-run gates as scheduled searching.
+
+For an excerpt-only lead, **Compare a full advert I copied** lets the applicant paste the complete advert and optional separate person specification for a tentative, read-only comparison. The text and result are not saved; the tracker lead stays an excerpt, cannot gain an application action from this comparison, and no unreviewed employer site is contacted. Use the reviewed official-advert URL path when one is available instead.
+
 ## Requirements
 
 - Node.js 22–25
@@ -102,6 +106,19 @@ The onboarding service includes a local browser form for preferences, core appli
 2. Run `pnpm db:migrate`.
 3. Run `pnpm api`.
 4. Open `http://127.0.0.1:3210/onboarding` in a browser.
+
+On this Windows PC, the per-user `JobApplicationAgent` scheduled task starts the built local API at
+sign-in using `scripts/run-local-agent.ps1`. It reads secrets from the ignored `.env` file; no
+token is stored in the task command. The PC must be on, the user signed in, and the network
+available for scheduled discovery and Discord delivery. The task does not build code or enable
+real-employer form filling/submission. If the project moves or is rebuilt on another PC, update
+the task's script path before relying on it. Check the local `/health` page and Task Scheduler's
+`JobApplicationAgent` status if the tracker is unavailable.
+
+For running discovery and outbound Discord notifications while this PC is off, a restricted
+container package is prepared in [`docs/runbooks/always-on-discovery.md`](docs/runbooks/always-on-discovery.md).
+It is not deployed yet; the shortlist-quality sign-off, host choice, encrypted data transfer,
+backup, and single-writer cutover are still required. Hosted mode does not enable real applications.
 
 The form requires the local `PROFILE_ADMIN_TOKEN` from `.env`. Treat it like a password: do not paste it into chat, commit it, or send it to another person. It is kept only in the open page's memory and is not placed in browser storage.
 
@@ -130,6 +147,7 @@ Available routes:
 - `GET /v1/tracker/:userId/jobs` — filtered shortlist: status, advert state, score, employer, location, salary, salary certainty, discovery date, closing date, source and free text.
 - `GET /v1/tracker/:userId/jobs/:jobId` — one job with its stored decision, reasons and history.
 - `POST /v1/tracker/:userId/jobs/:jobId/status` — records an explicit review decision.
+- `POST /v1/tracker/:userId/jobs/:jobId/pasted-advert-review` — transient comparison of applicant-supplied full advert text, with no employer-site fetch or change to the tracked lead.
 - `GET|POST /v1/sources`, `POST /v1/sources/:key/enabled`, `PUT /v1/sources/:key/urls` — reviewed source configuration. Switching a source on returns `409` with a plain-language reason when the site policy is missing, expired, prohibited or does not cover that discovery action, or when no reviewed reader exists for the domain.
 - `POST /v1/discovery/runs` — an on-demand run of one reviewed source.
 - `POST /v1/discovery/manual-url` — saves one public MyJobScotland vacancy link, reads the advert and returns its match decision in the same request.

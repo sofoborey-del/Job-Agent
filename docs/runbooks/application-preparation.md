@@ -33,6 +33,15 @@ pnpm api
 
 ## Preparing one application
 
+If a search result says **Excerpt only**, open the original link and look for the employer's full
+advert. A reviewed official MyJobScotland URL can be pasted into **Read the official advert** so
+the agent can save and score the full criteria. For any other site that has not been reviewed, use
+**Compare a full advert I copied**: paste the full advert, and paste any separate person
+specification as well. That comparison is tentative and disappears when you leave the page. It
+does not upgrade the tracked excerpt, prepare an application, or contact the employer. You may
+manually shortlist the lead for your own follow-up, but do not treat its tentative score as proof
+that every prerequisite was met.
+
 1. Open `http://127.0.0.1:3210/tracker`, enter your admin token and profile ID, and load your jobs.
 2. On a shortlisted job, choose **Prepare application**. Read the eligibility concerns and the
    criteria first. If the job is closed, restricted to internal candidates, or already recorded as

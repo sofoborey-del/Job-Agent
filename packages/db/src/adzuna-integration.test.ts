@@ -44,10 +44,10 @@ it('ingests Adzuna API results as incomplete leads without visiting employer sit
     });
     expect(activation.source.enabled).toBe(true);
 
-    const requested: string[] = [];
+    const requested: URL[] = [];
     const fetcher = ((input: string | URL) => {
       const url = new URL(input.toString());
-      requested.push(url.hostname);
+      requested.push(url);
       if (url.hostname !== 'api.adzuna.com') throw new Error('Unexpected off-host fetch');
       return Promise.resolve(
         new Response(
@@ -84,7 +84,24 @@ it('ingests Adzuna API results as incomplete leads without visiting employer sit
     });
     expect(first.status).toBe('succeeded');
     expect(first.counts.created).toBe(1);
-    expect(requested).toEqual(['api.adzuna.com']);
+    expect(requested).toHaveLength(8);
+    expect(requested.every((url) => url.hostname === 'api.adzuna.com')).toBe(true);
+    expect(requested.map((url) => url.searchParams.get('what'))).toEqual(
+      expect.arrayContaining([
+        'customer service',
+        'administration',
+        'insurance',
+        'fraud',
+        'compliance',
+        'financial services',
+        'remote customer service',
+        'remote administrator',
+      ]),
+    );
+    expect(
+      requested.reduce((total, url) => total + Number(url.searchParams.get('results_per_page')), 0),
+    ).toBe(25);
+    expect(requested.every((url) => url.searchParams.get('salary_min') === '25000')).toBe(true);
 
     const rows = await database.db.query<{
       description_completeness: string;
@@ -111,8 +128,18 @@ it('ingests Adzuna API results as incomplete leads without visiting employer sit
       trigger: 'manual',
       now,
     });
-    expect(replay.status).toBe('already_ran');
-    expect(requested).toEqual(['api.adzuna.com']);
+    expect(replay.status).toBe('skipped');
+    expect(replay.skipReason).toBe('search_recently_completed');
+    expect(requested).toHaveLength(8);
+
+    const afterCooldown = await service.runSource({
+      sourceKey: 'adzuna_gb_search',
+      trigger: 'manual',
+      now: new Date(now.getTime() + 60 * 60_000),
+    });
+    expect(afterCooldown.status).toBe('succeeded');
+    expect(afterCooldown.counts.created).toBe(0);
+    expect(requested).toHaveLength(16);
   } finally {
     await database.close();
   }

@@ -7,6 +7,7 @@ import {
   type SourceDefinition,
 } from '@job-agent/discovery';
 import { findMissingProfileCategories } from '@job-agent/knowledge-base';
+import { shadowMatch } from '@job-agent/matching';
 import { newCorrelationId } from '@job-agent/observability';
 import type { SitePolicy } from '@job-agent/policy';
 import { evaluateSitePolicy } from '@job-agent/policy';
@@ -76,6 +77,11 @@ const statusChangeSchema = z.object({
 });
 
 const manualUrlSchema = z.object({ userId: z.uuid(), url: z.url().startsWith('https://') });
+const pastedAdvertSchema = z.object({
+  advertText: z.string().trim().min(300).max(50_000),
+  criteriaText: z.string().trim().max(30_000).default(''),
+  confirmedComplete: z.literal(true),
+});
 const runSchema = z.object({ userId: z.uuid(), sourceKey: z.string().min(3).max(48) });
 const matchSchema = z.object({ userId: z.uuid() });
 const pauseSchema = z.object({ reason: z.string().max(200).optional() });
@@ -189,6 +195,107 @@ export function registerTrackerRoutes(
       return reply.header('cache-control', 'no-store').send({
         ...detail,
         allowedNextStatuses: reviewTransitionsFrom(detail.reviewStatus),
+      });
+    },
+  );
+
+  /**
+   * A transient comparison for a complete advert the applicant copied themselves. It never
+   * fetches the supplied job's unreviewed destination, changes the saved lead, or establishes
+   * verified criteria for automatic progression. The text is untrusted data, not instructions.
+   */
+  app.post<{ Params: { userId: string; jobId: string } }>(
+    '/v1/tracker/:userId/jobs/:jobId/pasted-advert-review',
+    async (request, reply) => {
+      const userId = z.uuid().safeParse(request.params.userId);
+      const jobId = z.uuid().safeParse(request.params.jobId);
+      const body = pastedAdvertSchema.safeParse(request.body);
+      if (!userId.success || !jobId.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      const entry = await runtime.stores.tracking.getForMatching(userId.data, jobId.data);
+      if (entry === null) return reply.code(404).send({ error: 'unknown_job' });
+      if (
+        entry.job.descriptionCompleteness !== 'snippet' ||
+        !['open', 'changed'].includes(entry.lifecycleStatus) ||
+        (entry.job.closesAt !== null && new Date(entry.job.closesAt).getTime() <= Date.now())
+      ) {
+        return reply.code(409).send({
+          error: 'lead_not_reviewable',
+          message: 'Only an open, excerpt-only lead can be compared this way.',
+        });
+      }
+
+      const facts = await profileService.listFacts(userId.data);
+      const missingCategories = findMissingProfileCategories(facts);
+      if (missingCategories.length > 0) {
+        return reply.code(409).send({
+          error: 'profile_not_ready',
+          message: 'Finish your approved profile before comparing an advert.',
+          missingCategories,
+        });
+      }
+      const comparison = shadowMatch(
+        {
+          id: entry.jobId,
+          title: entry.job.title,
+          employer: entry.job.employer,
+          location: entry.job.location,
+          description: body.data.advertText,
+          descriptionCompleteness: 'full',
+          salary: entry.job.salary,
+          contractType: entry.job.contractType,
+          employmentTypes: entry.job.employmentTypes,
+          workPattern: entry.job.workPattern,
+          closesAt: entry.job.closesAt,
+          personSpecification:
+            body.data.criteriaText === ''
+              ? {
+                  status: 'unreadable',
+                  reason: 'Any separate person specification has not been independently checked.',
+                }
+              : { status: 'read', text: body.data.criteriaText },
+        },
+        facts,
+      );
+      await runtime.stores.audit.append(
+        {
+          userId: userId.data,
+          actorType: 'user',
+          actorId: null,
+          action: 'tracker.pasted_advert_compared',
+          resourceType: 'job',
+          resourceId: jobId.data,
+          result: 'succeeded',
+          policyVersion: null,
+          correlationId: newCorrelationId(),
+          // Never retain the pasted advert, criteria text, or applicant values in the audit log.
+          metadata: {
+            advertCharacters: body.data.advertText.length,
+            criteriaCharacters: body.data.criteriaText.length,
+            extractedRequirements: comparison.requirements.length,
+          },
+        },
+        new Date(),
+      );
+      return reply.header('cache-control', 'no-store').send({
+        mode: 'pasted_text_review_only',
+        textSaved: false,
+        employerSiteContacted: false,
+        trackerChanged: false,
+        applicationActionsEnabled: false,
+        tentativeScore: comparison.criteria.visible ? comparison.decision.score : null,
+        salaryGate: comparison.salaryGate,
+        eligibility: comparison.eligibility.status,
+        hardRejectReasons: comparison.decision.hardRejectReasons,
+        criteria: comparison.criteria,
+        requirements: comparison.requirements.map((requirement) => ({
+          text: requirement.text,
+          outcome: requirement.outcome,
+          explanation: requirement.explanation,
+        })),
+        message:
+          'This is a tentative comparison of text you pasted, not a verified full advert. The saved lead and its application safeguards have not changed.',
       });
     },
   );

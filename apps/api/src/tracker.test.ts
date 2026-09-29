@@ -221,6 +221,10 @@ describe('tracker API', () => {
     expect(page.statusCode).toBe(200);
     expect(page.headers['cache-control']).toBe('no-store');
     expect(page.body).toContain('Your job shortlist');
+    expect(page.body).toContain('Find jobs now');
+    expect(page.body).toContain("sourceKey: 'adzuna_gb_search'");
+    expect(page.body).toContain('<option value="discovered_desc" selected>Newest first</option>');
+    expect(page.body).not.toContain('<option value="shortlisted" selected>');
 
     const health = await app.inject({ method: 'GET', url: '/health' });
     expect(health.json()).toMatchObject({ browserAutomation: false, autoSubmit: false });
@@ -639,6 +643,102 @@ describe('completing an excerpt-only lead from the official advert', () => {
     const lead = body.jobs.find((job) => job.jobId === jobId);
     expect(lead?.descriptionCompleteness).toBe('snippet');
     expect(lead?.reviewStatus).toBe('discovered');
+  });
+
+  it('compares pasted complete text without fetching, saving it, or upgrading the lead', async () => {
+    await seedCompleteProfile();
+    const leadId = await seedLead();
+    const advertText = (
+      'Customer service experience is essential. Data protection knowledge is required. ' +
+      'The post involves helping customers, keeping accurate records and working to deadlines. '
+    ).repeat(4);
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/tracker/${userId}/jobs/${leadId}/pasted-advert-review`,
+      headers: auth,
+      payload: {
+        advertText,
+        criteriaText: 'Applicants must have customer service and data protection experience.',
+        confirmedComplete: true,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      mode: 'pasted_text_review_only',
+      textSaved: false,
+      employerSiteContacted: false,
+      trackerChanged: false,
+      applicationActionsEnabled: false,
+    });
+    expect(response.json<{ tentativeScore: number | null }>().tentativeScore).not.toBeNull();
+    expect(response.body).not.toContain(advertText);
+    const saved = await database.query<{
+      description: string;
+      description_completeness: string;
+      version: number;
+    }>('SELECT description, description_completeness, version FROM jobs WHERE id = $1', [leadId]);
+    expect(saved.rows[0]).toEqual({
+      description: 'Handle customer enquiries for a busy team. You will need experience of…',
+      description_completeness: 'snippet',
+      version: 1,
+    });
+    expect((await stores.tracking.get(userId, leadId))?.reviewStatus).toBe('discovered');
+  });
+
+  it('requires confirmation, a complete profile, and ownership of an open excerpt-only lead', async () => {
+    const leadId = await seedLead();
+    const advertText = 'Customer service experience is essential. '.repeat(12);
+    const path = `/v1/tracker/${userId}/jobs/${leadId}/pasted-advert-review`;
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: path,
+          payload: { advertText, confirmedComplete: true },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: path,
+          headers: auth,
+          payload: { advertText, confirmedComplete: false },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: path,
+          headers: auth,
+          payload: { advertText, confirmedComplete: true },
+        })
+      ).statusCode,
+    ).toBe(409);
+    await seedCompleteProfile();
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/v1/tracker/${uuidv7()}/jobs/${leadId}/pasted-advert-review`,
+          headers: auth,
+          payload: { advertText, confirmedComplete: true },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/v1/tracker/${userId}/jobs/${jobId}/pasted-advert-review`,
+          headers: auth,
+          payload: { advertText, confirmedComplete: true },
+        })
+      ).statusCode,
+    ).toBe(409);
   });
 
   /** The guarantee that matters: an unreviewed site is refused, and nothing is fetched. */

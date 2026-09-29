@@ -1,0 +1,21 @@
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+RUN npm install --global pnpm@10.34.5
+COPY . .
+RUN pnpm install --frozen-lockfile && pnpm build
+
+FROM node:24-bookworm-slim
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps ./apps
+COPY --from=build /app/packages ./packages
+COPY --from=build /app/migrations ./migrations
+COPY --from=build /app/package.json ./package.json
+# The build context carries whatever directory modes the host filesystem had, and the image
+# runs as an unprivileged user. Make every copied path traversable and readable by it, so a
+# restrictive umask on the machine that prepared the context cannot stop the app from starting.
+RUN chmod -R a+rX /app
+RUN mkdir /data && chown node:node /data
+USER node
+CMD ["node", "apps/api/dist/index.js"]
