@@ -54,6 +54,56 @@ describe('notification cards', () => {
     expect(JSON.stringify(payload)).not.toContain('Samuel');
   });
 
+  it('announces leads without claiming any of them is a match', () => {
+    const text = renderCardText(
+      buildCard({
+        eventType: 'LEADS_DISCOVERED',
+        payload: {
+          source: 'Adzuna UK job search (documented API)',
+          sourceKey: 'adzuna_gb_search',
+          newLeads: 5,
+          criteriaRead: 0,
+          examples: ['Fraud Specialist — Teleperformance', 'Compliance Analyst — Adecco'],
+        },
+      }),
+    );
+    expect(text).toContain('5 new vacancies');
+    expect(text).toContain('Fraud Specialist');
+    expect(text).toContain('requirements have not been read');
+    expect(text).toContain('leads to look at, not matches');
+    expect(text).toContain('Nothing has been applied for.');
+    // The wording a match card uses must never appear here.
+    expect(text).not.toContain('/100');
+    expect(text).not.toContain('shortlist');
+  });
+
+  it('omits the unread-criteria warning when every lead had its criteria read', () => {
+    const text = renderCardText(
+      buildCard({
+        eventType: 'LEADS_DISCOVERED',
+        payload: { source: 'A reviewed source', newLeads: 2, criteriaRead: 2, examples: [] },
+      }),
+    );
+    expect(text).toContain('2 new vacancies');
+    expect(text).not.toContain('have not been read');
+  });
+
+  it('keeps applicant data out of a leads notification', () => {
+    const payload = safePayload({
+      newLeads: 3,
+      criteriaRead: 0,
+      examples: ['Fraud Specialist — Teleperformance'],
+      applicantName: 'Samuel',
+      cvText: 'Six years in FCA regulated firms',
+    });
+    expect(payload).toEqual({
+      newLeads: 3,
+      criteriaRead: 0,
+      examples: ['Fraud Specialist — Teleperformance'],
+    });
+    expect(JSON.stringify(payload)).not.toContain('Samuel');
+  });
+
   it('explains a discovery failure without leaking the cause detail', () => {
     const text = renderCardText(
       buildCard({

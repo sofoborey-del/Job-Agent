@@ -114,6 +114,23 @@ it('ingests Adzuna API results as incomplete leads without visiting employer sit
       },
     ]);
 
+    // The lead is announced, because leads arriving is a fact. It is not called a match, because
+    // nobody has read its criteria.
+    const announced = await database.db.query<{
+      event_type: string;
+      dedupe_key: string;
+      payload_json: Record<string, unknown>;
+    }>('SELECT event_type, dedupe_key, payload_json FROM outbox_events ORDER BY created_at');
+    expect(announced.rows).toHaveLength(1);
+    expect(announced.rows[0]?.event_type).toBe('LEADS_DISCOVERED');
+    expect(announced.rows[0]?.dedupe_key).toBe(`leads_discovered:${String(first.runId)}`);
+    expect(announced.rows[0]?.payload_json).toMatchObject({
+      sourceKey: 'adzuna_gb_search',
+      newLeads: 1,
+      criteriaRead: 0,
+      examples: ['Customer Service Advisor — Example Employer'],
+    });
+
     const matched = await new JobMatchService({ stores, userId }).matchAwaiting({ facts: [], now });
     expect(matched.evaluated).toBe(1);
     expect(matched.notified).toBe(0);
@@ -140,6 +157,13 @@ it('ingests Adzuna API results as incomplete leads without visiting employer sit
     expect(afterCooldown.status).toBe('succeeded');
     expect(afterCooldown.counts.created).toBe(0);
     expect(requested).toHaveLength(16);
+
+    // A refused replay and a run that found nothing new both stay silent, so repeated discovery
+    // cannot produce a second message about the same lead.
+    const afterRepeats = await database.db.query<{ n: number }>(
+      'SELECT count(*)::int AS n FROM outbox_events',
+    );
+    expect(afterRepeats.rows[0]?.n).toBe(1);
   } finally {
     await database.close();
   }

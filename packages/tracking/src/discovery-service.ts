@@ -161,6 +161,7 @@ export class DiscoveryService {
 
     const limiter = new PolicyRateLimiter(policy);
     const newlyTrackedJobIds: string[] = [];
+    const newLeads: Array<{ title: string; employer: string; criteriaRead: boolean }> = [];
     const seenExternalIds: string[] = [];
     let listingWasComplete = source.adapterType === 'public_feed';
 
@@ -246,6 +247,11 @@ export class DiscoveryService {
           if (result.outcome === 'created') {
             counts.created += 1;
             newlyTrackedJobIds.push(result.jobId);
+            newLeads.push({
+              title: normalised.title,
+              employer: normalised.employer,
+              criteriaRead: normalised.personSpecification.status === 'read',
+            });
           } else if (result.outcome === 'changed') {
             counts.changed += 1;
             newlyTrackedJobIds.push(result.jobId);
@@ -285,6 +291,28 @@ export class DiscoveryService {
       await stores.discoveryRuns.finish({ runId: run.id, status: 'succeeded', counts, now });
       const intervalMs = scheduleIntervalOrMinimum(source.scheduleIntervalSeconds) * 1000;
       await stores.sources.recordSuccess(source.id, now, new Date(now.getTime() + intervalMs));
+      // A vacancy whose criteria nobody has read is a lead, not a match. This says only that
+      // leads arrived and how many, and makes no claim about suitability. That is what lets it
+      // be sent for an excerpt-only source, which JOB_MATCHED deliberately stays silent about.
+      // The dedupe key is the run, so a retried delivery cannot produce a second message.
+      if (newLeads.length > 0) {
+        await stores.outbox.enqueue(
+          {
+            eventType: 'LEADS_DISCOVERED',
+            channel: 'discord',
+            dedupeKey: `leads_discovered:${run.id}`,
+            correlationId,
+            payload: {
+              source: source.displayName,
+              sourceKey: source.sourceKey,
+              newLeads: newLeads.length,
+              criteriaRead: newLeads.filter((lead) => lead.criteriaRead).length,
+              examples: newLeads.slice(0, 5).map((lead) => `${lead.title} — ${lead.employer}`),
+            },
+          },
+          now,
+        );
+      }
       await stores.audit.append(
         {
           userId: this.options.userId,

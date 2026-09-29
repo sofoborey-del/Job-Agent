@@ -33,6 +33,9 @@ const allowedPayloadKeys = new Set([
   'counts',
   'pending',
   'deadLettered',
+  'newLeads',
+  'criteriaRead',
+  'examples',
 ]);
 
 export function safePayload(payload: Record<string, unknown>): Record<string, unknown> {
@@ -95,6 +98,31 @@ function discoveryFailedCard(payload: Record<string, unknown>): NotificationCard
   };
 }
 
+/**
+ * Says that leads arrived, and nothing about whether they suit the applicant. A vacancy whose
+ * criteria have not been read cannot be called a match, so this card counts and names them and
+ * asks the person to look. JOB_MATCHED remains the only card that claims a match.
+ */
+function leadsDiscoveredCard(payload: Record<string, unknown>): NotificationCard {
+  const total = typeof payload.newLeads === 'number' ? payload.newLeads : 0;
+  const read = typeof payload.criteriaRead === 'number' ? payload.criteriaRead : 0;
+  const unread = Math.max(total - read, 0);
+  const examples = Array.isArray(payload.examples)
+    ? payload.examples.slice(0, 5).map((example) => String(example))
+    : [];
+  const lines = [
+    `${String(total)} new ${total === 1 ? 'vacancy' : 'vacancies'} from ${text(payload.source, 'a source')}.`,
+  ];
+  if (unread > 0) {
+    lines.push(
+      `${String(unread)} arrived as an excerpt, so the requirements have not been read. These are leads to look at, not matches.`,
+    );
+  }
+  lines.push(...examples.map((example) => `- ${example}`));
+  lines.push('Nothing has been applied for.');
+  return { title: 'New job leads', lines, url: null, severity: 'info' };
+}
+
 function agentPausedCard(payload: Record<string, unknown>): NotificationCard {
   return {
     title: 'Job agent paused',
@@ -132,6 +160,8 @@ export function buildCard(
   switch (event.eventType) {
     case 'JOB_MATCHED':
       return jobMatchedCard(payload);
+    case 'LEADS_DISCOVERED':
+      return leadsDiscoveredCard(payload);
     case 'DISCOVERY_FAILED':
       return discoveryFailedCard(payload);
     case 'AGENT_PAUSED':
