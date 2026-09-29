@@ -168,7 +168,12 @@ function emailApplicationFailedCard(payload: Record<string, unknown>): Notificat
     lines: [
       `Reason code: ${text(payload.errorCode, 'unknown')}`,
       'The provider refused the message, so no application was made. Prepare it again when the cause is fixed.',
-    ],
+      // Named explicitly because it is the one that recurs: Google expires a refresh token after
+      // 7 days while the OAuth app is in Testing status.
+      text(payload.errorCode, '') === 'not_authorised'
+        ? 'That usually means the Google authorisation expired. Run `pnpm email:authorise` on the machine running the agent.'
+        : '',
+    ].filter((line) => line !== ''),
     url: null,
     severity: 'error',
   };

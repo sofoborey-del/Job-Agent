@@ -1,122 +1,42 @@
 /**
- * One-time authorisation of the applicant's own Gmail account for sending.
+ * Re-authorises the send-only Gmail permission, and saves the new refresh token.
  *
- *   node --env-file=.env scripts/email-authorise.mjs
+ *   pnpm email:authorise
  *
- * What it does: opens a loopback listener, prints a Google consent URL for you to open, receives
- * the one-time code Google redirects back, exchanges it for a refresh token, and prints that token
- * in this terminal for you to paste into your local .env. It writes nothing to disk and sends
- * nothing anywhere else.
+ * Use this when a send fails with "not authorised". The usual cause is that the OAuth app is still in
+ * Testing status, where Google expires refresh tokens after 7 days; changing your Google password
+ * also revokes tokens carrying Gmail scopes. It takes about twenty seconds.
  *
- * The scope requested is https://www.googleapis.com/auth/gmail.send and nothing else. That scope
- * permits sending a message as you, and grants no ability to read, list, label or delete anything
- * in your mailbox. You can revoke it at any time at https://myaccount.google.com/permissions.
+ * For first-time setup use `pnpm email:setup`, which walks through the Google Cloud steps as well.
  *
- * Before running this you need a Google Cloud OAuth client of type "Desktop app"; the runbook
- * docs/runbooks/email-applications.md gives the steps. Put its client id and secret in .env as
- * GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET first.
+ * The scope requested is gmail.send and nothing else: it permits sending as you and grants no
+ * ability to read, list, label or delete anything in your mailbox. Withdraw it whenever you like at
+ * https://myaccount.google.com/permissions.
  */
-import { createHash, randomBytes } from 'node:crypto';
-import { createServer } from 'node:http';
+import { hasValue, updateEnvFile } from './email-env.mjs';
+import { authoriseGmail, explainOAuthFailure } from './email-oauth.mjs';
 
-const SCOPE = 'https://www.googleapis.com/auth/gmail.send';
-const clientId = process.env.GMAIL_CLIENT_ID ?? '';
-const clientSecret = process.env.GMAIL_CLIENT_SECRET ?? '';
+const ENV = '.env';
 
-if (clientId === '' || clientSecret === '') {
+if (!hasValue(ENV, 'GMAIL_CLIENT_ID') || !hasValue(ENV, 'GMAIL_CLIENT_SECRET')) {
   console.error(
-    'Set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .env first. See docs/runbooks/email-applications.md.',
+    'GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET are not set yet. Run "pnpm email:setup" first — it\nwalks through creating them.',
   );
   process.exit(1);
 }
 
-const base64Url = (buffer) =>
-  buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-const verifier = base64Url(randomBytes(48));
-const challenge = base64Url(createHash('sha256').update(verifier).digest());
-const state = base64Url(randomBytes(16));
-
-const server = createServer();
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-const { port } = server.address();
-const redirectUri = `http://127.0.0.1:${String(port)}`;
-
-const authorisationUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-authorisationUrl.search = new URLSearchParams({
-  client_id: clientId,
-  redirect_uri: redirectUri,
-  response_type: 'code',
-  scope: SCOPE,
-  access_type: 'offline',
-  // Forces a refresh token even if you have authorised this client before.
-  prompt: 'consent',
-  state,
-  code_challenge: challenge,
-  code_challenge_method: 'S256',
-}).toString();
-
-console.log('\nOpen this address in your browser and approve the send-only permission:\n');
-console.log(authorisationUrl.toString());
-console.log('\nWaiting for Google to redirect back to this machine…');
-
-const code = await new Promise((resolve, reject) => {
-  const timeout = setTimeout(() => reject(new Error('timed out after five minutes')), 300_000);
-  server.on('request', (request, response) => {
-    const url = new URL(request.url ?? '/', redirectUri);
-    const returnedState = url.searchParams.get('state');
-    const returnedCode = url.searchParams.get('code');
-    const error = url.searchParams.get('error');
-    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
-    if (error !== null) {
-      response.end('Authorisation was refused. You can close this tab.');
-      clearTimeout(timeout);
-      reject(new Error(`Google returned: ${error}`));
-      return;
-    }
-    if (returnedState !== state || returnedCode === null) {
-      response.end('That response did not match this request. You can close this tab.');
-      return;
-    }
-    response.end('Authorised. You can close this tab and return to the terminal.');
-    clearTimeout(timeout);
-    resolve(returnedCode);
+try {
+  const { refreshToken, scope } = await authoriseGmail({
+    clientId: process.env.GMAIL_CLIENT_ID,
+    clientSecret: process.env.GMAIL_CLIENT_SECRET,
+    log: (line) => {
+      console.log(line);
+    },
   });
-});
-
-server.close();
-
-const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-  method: 'POST',
-  headers: { 'content-type': 'application/x-www-form-urlencoded' },
-  body: new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
-    code,
-    code_verifier: verifier,
-    grant_type: 'authorization_code',
-    redirect_uri: redirectUri,
-  }).toString(),
-});
-
-if (!tokenResponse.ok) {
-  // The body can echo the request but never the secret, which is only ever a form field.
-  console.error(`\nGoogle refused the exchange: HTTP ${String(tokenResponse.status)}`);
+  updateEnvFile(ENV, { GMAIL_REFRESH_TOKEN: refreshToken });
+  console.log(`\nAuthorised, and saved to .env. Scope granted: ${scope}`);
+  console.log('Restart the agent so it picks up the new token.');
+} catch (error) {
+  console.error(`\n${explainOAuthFailure(error instanceof Error ? error.message : error)}\n`);
   process.exit(1);
 }
-
-const tokens = await tokenResponse.json();
-if (typeof tokens.refresh_token !== 'string') {
-  console.error(
-    '\nGoogle returned no refresh token. Revoke this application at https://myaccount.google.com/permissions and run this again.',
-  );
-  process.exit(1);
-}
-
-console.log(
-  '\nAuthorised. Add this line to your local .env, then delete it from your scrollback:\n',
-);
-console.log(`GMAIL_REFRESH_TOKEN=${tokens.refresh_token}`);
-console.log(
-  `\nScope granted: ${typeof tokens.scope === 'string' ? tokens.scope : SCOPE}\nThen run: pnpm email:check --send`,
-);

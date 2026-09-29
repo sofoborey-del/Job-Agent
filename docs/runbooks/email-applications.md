@@ -49,52 +49,58 @@ than quoted back at the employer.
 
 ## What you must configure
 
-Nothing here works until you do these, on your own machine, in your own `.env`. Do not paste any of
-these values into a chat.
+Run this and follow it. It opens each page you need, names the button you are looking for, checks
+what you paste back, and writes it to your local `.env` (keeping a `.env.backup`). It is resumable, so
+anything already done is detected and skipped.
 
-1. **Create a Google Cloud OAuth client.**
-   - <https://console.cloud.google.com/> → a project of your own → **APIs & Services**.
-   - **Enabled APIs & services** → **Enable APIs and services** → enable **Gmail API**.
-   - **OAuth consent screen** → External → fill in the minimum → add yourself as a **Test user**.
-     Leave it in Testing; it never needs verification for your own account.
-   - **Credentials** → **Create credentials** → **OAuth client ID** → **Desktop app**.
-   - Put the client id and secret in `.env` as `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET`.
+```bash
+pnpm email:setup
+```
 
-2. **Authorise your own account, send-only.**
+It ends by sending one test message to an address you choose, so you see it arrive before any vacancy
+is involved. Nothing reaches an employer during setup.
 
-   ```bash
-   pnpm email:authorise
-   ```
+Then:
 
-   It prints a Google consent URL, receives the redirect on loopback, and prints a
-   `GMAIL_REFRESH_TOKEN=` line for you to paste into `.env`. The only scope requested is
-   `https://www.googleapis.com/auth/gmail.send`, which permits sending as you and grants **no** read,
-   list, label or delete access to your mailbox. Revoke it whenever you like at
-   <https://myaccount.google.com/permissions>.
+```bash
+pnpm discord:register
+```
 
-3. **Prove the credentials work, without touching a vacancy.**
+and restart the agent so it reads the new `.env`.
 
-   ```bash
-   pnpm email:check --send you@example.com
-   ```
+### What it walks you through, if you would rather know first
 
-   That sends one message to yourself, with no attachment from your profile, and records nothing.
+1. **A Google Cloud project** — a free, private container for the credential. Nothing runs in it.
+2. **Switching on the Gmail API** for that project.
+3. **The consent screen** — an app name, your own address, audience "External". No verification, no
+   website, no domain.
+4. **Adding yourself as a test user.** This is the step people miss; skipping it makes authorisation
+   fail with `access_denied`, and the script says so in those words if it happens.
+5. **Creating an OAuth client of type "Desktop app".** A "Web application" client cannot do this flow.
+6. **Approving the permission**, which is `https://www.googleapis.com/auth/gmail.send` and nothing
+   else. It permits sending as you and grants no ability to read, list, label or delete anything in
+   your mailbox. Withdraw it whenever you like at <https://myaccount.google.com/permissions>.
 
-4. **Switch the feature on.**
+Google will warn that the app is not verified. That is expected: the app is yours, it is not
+published, and the only permission it asks for is the one above. Choose Advanced and continue.
 
-   ```text
-   EMAIL_APPLICATIONS_ENABLED=true
-   EMAIL_PROVIDER=gmail
-   ```
+### The one recurring chore
 
-   The agent refuses to start with these set and any credential missing, and refuses them entirely in
-   `discovery_only` mode — the hosted VM has no approval surface and must not be able to send.
+While the OAuth app's publishing status is **Testing**, Google expires the refresh token after
+**7 days**. A send then fails with `not_authorised`, the vacancy is left untouched, and both the
+Discord message and the failure notification tell you what to do:
 
-5. **Register the new slash commands.**
+```bash
+pnpm email:authorise
+```
 
-   ```bash
-   pnpm discord:register
-   ```
+That takes about twenty seconds and needs no Cloud Console work. Changing your Google password also
+revokes the token, for the same reason.
+
+You can try **PUBLISH APP** on the consent screen to remove the 7-day limit. Google's documented
+position is that apps requesting a restricted scope — which `gmail.send` is — must complete
+verification before launch, so it may refuse or ask you to verify. If it does, weekly re-authorising
+is the simpler answer, and nothing else about the agent changes either way.
 
 ## Using it
 

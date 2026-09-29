@@ -89,7 +89,7 @@ The architecture specification is authoritative. If implementation and specifica
   browser worker drives. No candidate-account access, no real
   employer form, and no submission capability outside that fake target.
 
-`pnpm check` passes 749 tests across 62 files (the Playwright tests skip themselves on a machine
+`pnpm check` passes 760 tests across 63 files (the Playwright tests skip themselves on a machine
 where `pnpm browser:install` has not been run). It runs `lint`, `format:check`, `typecheck` and
 `test`; `format:check` was added on 2026-09-29 because unformatted code could otherwise be committed
 and then surface as a large unrelated diff the next time anyone ran `pnpm format`. Prettier ignores
@@ -354,8 +354,21 @@ the person's own evidence closes it out. An unconfirmed send counts against the 
 
 **Provider.** Gmail's documented API with the send-only scope
 `https://www.googleapis.com/auth/gmail.send`, which grants no read access at all, authorised by the
-person against their own account with `pnpm email:authorise`, and proved with
-`pnpm email:check --send`. `FakeEmailTransport` exists for tests and is deliberately **not** wired
+person against their own account. `pnpm email:setup` is a guided, resumable walkthrough of the Google
+Cloud steps: it opens each console page, names the button, validates what is pasted back, writes to
+`.env` via `scripts/email-env.mjs` (which preserves comments, ordering and line endings, keeps a
+`.env.backup`, and is pinned by 11 tests because it rewrites the file holding every local secret),
+and finishes by sending a test message to an address the person chooses.
+
+**A known chore, not a defect.** While the OAuth app's publishing status is `Testing`, Google expires
+the refresh token after 7 days — that is documented behaviour for an external app requesting anything
+beyond basic profile scopes. A send then fails `not_authorised`, nothing is recorded as applied for,
+and `pnpm email:authorise` fixes it in twenty seconds. `explainOAuthFailure` in
+`scripts/email-oauth.mjs` translates every common Google error into the screen that causes it, and
+both the Discord reply and the `EMAIL_APPLICATION_FAILED` card name the remedy for this specific code
+rather than printing a bare code. Publishing the app would remove the 7-day limit, but `gmail.send` is
+a restricted scope and Google's documented position is that those require verification before launch,
+so do not assume publishing is available. `FakeEmailTransport` exists for tests and is deliberately **not** wired
 into `apps/api`: a transport that pretends to send would record an application that never happened
 and could stop the person applying for a job they wanted.
 
@@ -944,8 +957,10 @@ pnpm db:migrate
 pnpm api
 pnpm browser:install   # once per machine, before any practice application
 pnpm fake-ats          # the local practice job site, 127.0.0.1:3311
-pnpm email:authorise   # one-time, send-only Gmail authorisation for email applications
+pnpm email:setup       # guided, resumable Google Cloud + Gmail setup for email applications
+pnpm email:authorise   # re-authorise when Google expires the refresh token (see below)
 pnpm email:check --send you@example.com   # proves the provider without touching a vacancy
+pnpm shortlist:report  # the tracker's grouping, for the Phase 1B gate
 ```
 
 Applying by email is `docs/runbooks/email-applications.md`. It is off unless

@@ -497,9 +497,17 @@ export function createEmailApplicationCommandPort(
         };
       }
       if (result.status === 'uncertain') return { ok: false, message: result.detail };
+      // The common failure is a refresh token Google expired after 7 days, which reads as a bare
+      // "not authorised" unless it is spelled out here.
+      const remedy =
+        result.errorCode === 'not_authorised'
+          ? ' Your Google authorisation has most likely expired: run `pnpm email:authorise` on the machine running the agent, then approve again.'
+          : result.errorCode === 'transport_not_configured'
+            ? ' No email provider is configured: run `pnpm email:setup`.'
+            : '';
       return {
         ok: false,
-        message: `Nothing was sent (${result.errorCode.replace(/_/g, ' ')}). The vacancy is untouched and you can prepare it again.`,
+        message: `Nothing was sent (${result.errorCode.replace(/_/g, ' ')}). The vacancy is untouched and you can prepare it again.${remedy}`,
       };
     },
 

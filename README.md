@@ -235,8 +235,11 @@ it, and that can predate the criteria-reading work. Choose **Score anything new*
 For vacancies whose advert **explicitly instructs candidates to apply by email**, approving in
 Discord really does send the application. Nothing else in this project does that.
 
-See [`docs/runbooks/email-applications.md`](docs/runbooks/email-applications.md) for what to
-configure and how to use it. In short: `/apply prepare id:<job>` reads the advert's own instruction,
+Setting it up is `pnpm email:setup`: a guided, resumable walkthrough that opens each Google page you
+need, names the button, and writes the result to your `.env`. See
+[`docs/runbooks/email-applications.md`](docs/runbooks/email-applications.md) for the detail, including
+the one recurring chore — while the Google app is in Testing status, the authorisation expires every
+7 days and `pnpm email:authorise` renews it in twenty seconds. In short: `/apply prepare id:<job>` reads the advert's own instruction,
 builds a message from verified profile facts only, and posts it to your private channel in full —
 recipient, reply address, subject, attachment name and hash, the advert's instruction quoted word for
 word, and the entire body as it would be sent. `/apply approve id:<job> manifest:<reference>` sends

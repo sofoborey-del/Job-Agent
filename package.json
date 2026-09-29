@@ -30,6 +30,7 @@
     "criteria:report": "pnpm build && node --env-file=.env scripts/criteria-extraction-report.mjs",
     "shortlist:report": "pnpm build && node --env-file=.env scripts/shortlist-grouping-report.mjs",
     "discord:check": "node --env-file=.env scripts/discord-check.mjs",
+    "email:setup": "pnpm build && node scripts/email-setup.mjs",
     "email:authorise": "node --env-file=.env scripts/email-authorise.mjs",
     "email:check": "pnpm build && node --env-file=.env scripts/email-check.mjs",
     "discord:register": "node --env-file=.env scripts/register-discord-commands.mjs"
