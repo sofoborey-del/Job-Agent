@@ -28,6 +28,7 @@
     "licence:options": "pnpm build && node scripts/licence-threshold-options.mjs",
     "review:real-adverts": "pnpm build && node scripts/real-advert-review.mjs",
     "criteria:report": "pnpm build && node --env-file=.env scripts/criteria-extraction-report.mjs",
+    "shortlist:report": "pnpm build && node --env-file=.env scripts/shortlist-grouping-report.mjs",
     "discord:check": "node --env-file=.env scripts/discord-check.mjs",
     "email:authorise": "node --env-file=.env scripts/email-authorise.mjs",
     "email:check": "pnpm build && node --env-file=.env scripts/email-check.mjs",

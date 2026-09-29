@@ -30,6 +30,45 @@ The page keeps both in the open tab's memory only. They are not saved in the bro
 
 The exit gate asks you to confirm the shortlist is actually useful. Do it in two passes.
 
+### 2z. Re-score first, or you will judge a stale decision
+
+Do this before anything else in this section. A tracker row shows the decision of the match run that
+last scored it, and that run can predate the current matcher by several releases. On 2026-09-29 the
+local database held ten adverts still scored by `shadow-1.3.0` and forty-five by `shadow-1.5.0`
+while the matcher was `shadow-1.6.0` — so the tracker reported "no requirements read" for adverts
+that had 65,000 characters of criteria text stored against them and ninety extracted requirement
+rows. Judging that would have been judging work the agent had already done but never applied.
+
+Start the API, open `/tracker`, and choose **Score anything new**. Since the re-score-on-matcher-change
+fix, that picks up every job whose last decision came from a different matcher, not only newly
+discovered ones. Then confirm with:
+
+```text
+pnpm shortlist:report
+```
+
+Every advert should now sit under a heading that matches what you would expect, and the
+"requirements read" total at the bottom should be far above zero.
+
+### 2y. Judge the grouping, not the score
+
+The tracker groups vacancies by how much of the advert the agent could actually check, and the score
+is now a secondary pill rather than the headline. That change was made because the score did not
+separate anything: across ten real adverts it sat in a 17-point band, and every rejection was a hard
+gate rather than a score. The bands are:
+
+| Group                        | What it means                                                              |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| Checked against your profile | Every requirement the advert states was judged either way.                 |
+| Partly checked               | Some judged, some not. Read the ones it could not judge.                   |
+| Yours to judge               | Requirements were read and none could be judged. The agent has no opinion. |
+| Requirements never read      | Nothing was established at all. Open the advert.                           |
+| Blocked                      | A hard gate failed. Nothing in your profile changes it.                    |
+
+None of those boundaries is a tunable number: each is decided by whether a count is zero. So there is
+nothing to tune here, and the question for the gate is simply whether the groups put the right
+vacancies in front of you.
+
 ### 2a. The synthetic corpus
 
 ```text

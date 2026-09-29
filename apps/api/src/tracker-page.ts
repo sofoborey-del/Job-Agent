@@ -32,7 +32,10 @@ export const trackerPageHtml = String.raw`<!doctype html>
     .pill.warn { background:#fff1c9; color:#6b4f00; }
     .pill.bad { background:#ffe4e4; color:#8a1c1c; }
     .topline { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; flex-wrap:wrap; }
-    .score { min-width:74px; height:74px; border-radius:50%; display:grid; place-items:center; background:#18322b; color:white; font-weight:850; }
+    .score { min-width:74px; height:74px; border-radius:50%; display:grid; place-items:center; background:#18322b; color:white; font-weight:850; text-align:center; line-height:1.1; }
+    .scorelabel { font-size:0.62rem; font-weight:600; opacity:0.8; letter-spacing:0.02em; }
+    .bandhead { margin:1.4rem 0 0.2rem; }
+    .bandhelp { margin:0 0 0.6rem; }
     .counts { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
     a { color:#09604d; font-weight:750; }
     details { margin-top:10px; }
@@ -167,8 +170,8 @@ export const trackerPageHtml = String.raw`<!doctype html>
       <div>
         <label for="fSort">Order by</label>
         <select id="fSort">
-          <option value="score_desc">Best match first</option>
-          <option value="score_asc">Lowest match first</option>
+          <option value="score_desc">Score, highest first</option>
+          <option value="score_asc">Score, lowest first</option>
           <option value="discovered_desc" selected>Newest first</option>
           <option value="closing_soon">Closing soonest</option>
         </select>
@@ -203,6 +206,24 @@ export const trackerPageHtml = String.raw`<!doctype html>
     pass: 'Salary meets your minimum',
     reject: 'Salary below your minimum',
     unknown: 'Salary not certain'
+  };
+  // Reading order, worst last. These are not score bands: each one is decided by whether a count is
+  // zero or not, so there is no threshold here to tune.
+  var bandOrder = { fully_checked: 0, partly_checked: 1, yours_to_judge: 2, criteria_unseen: 3, blocked: 4 };
+  var bandWords = {
+    fully_checked: 'Checked against your profile',
+    partly_checked: 'Partly checked',
+    yours_to_judge: 'Yours to judge',
+    criteria_unseen: 'Requirements never read',
+    blocked: 'Blocked'
+  };
+  var bandTone = { fully_checked: 'good', partly_checked: '', yours_to_judge: 'warn', criteria_unseen: 'warn', blocked: 'bad' };
+  var bandHelp = {
+    fully_checked: 'Every requirement the advert states was checked against your profile. These are the ones where the agent has something useful to say.',
+    partly_checked: 'Some requirements were checked and some could not be. Read the ones it could not judge.',
+    yours_to_judge: 'The requirements were read, and not one could be checked against your profile. The agent has no opinion on these; you do.',
+    criteria_unseen: 'No requirements were established at all, so nothing has been checked. Open the advert.',
+    blocked: 'A hard gate failed. No amount of profile evidence changes these.'
   };
 
   function say(text, isError) {
@@ -297,7 +318,7 @@ export const trackerPageHtml = String.raw`<!doctype html>
     container.replaceChildren();
     var heading = document.createElement('div');
     heading.className = 'muted';
-    heading.textContent = body.total + ' job(s) match these filters. The agent has not applied for any of them.';
+    heading.textContent = body.total + ' job(s) match these filters, grouped by how much the agent could actually check. The agent has not applied for any of them.';
     container.append(heading);
     if (!body.jobs.length) {
       var empty = document.createElement('div');
@@ -306,7 +327,31 @@ export const trackerPageHtml = String.raw`<!doctype html>
       container.append(empty);
       return;
     }
+    // Grouped rather than ranked. The order the filters asked for is preserved inside each group,
+    // so this adds a reading order and invents no comparison of its own.
+    var groups = [];
     body.jobs.forEach(function (job) {
+      var band = (job.assessment && job.assessment.band) || 'criteria_unseen';
+      var group = null;
+      groups.forEach(function (candidate) { if (candidate.band === band) group = candidate; });
+      if (!group) { group = { band: band, jobs: [] }; groups.push(group); }
+      group.jobs.push(job);
+    });
+    groups.sort(function (left, right) {
+      return (bandOrder[left.band] || 0) - (bandOrder[right.band] || 0);
+    });
+    groups.forEach(function (group) {
+      var bandHeading = document.createElement('h3');
+      bandHeading.className = 'bandhead';
+      bandHeading.textContent = (bandWords[group.band] || group.band) + ' (' + group.jobs.length + ')';
+      var bandNote = document.createElement('p');
+      bandNote.className = 'muted bandhelp';
+      bandNote.textContent = bandHelp[group.band] || '';
+      container.append(bandHeading, bandNote);
+      group.jobs.forEach(renderJobCard);
+    });
+
+    function renderJobCard(job) {
       var card = document.createElement('div');
       card.className = 'job';
       var top = document.createElement('div');
@@ -331,11 +376,32 @@ export const trackerPageHtml = String.raw`<!doctype html>
       if (job.descriptionCompleteness === 'snippet') pills.append(pill('Excerpt only', 'warn'));
       left.append(pills);
 
-      var score = document.createElement('div');
-      score.className = 'score';
-      score.textContent = job.score === null ? '--' : job.score + '/100';
-      top.append(left, score);
+      var assessment = job.assessment || { band: 'criteria_unseen', summary: '', criteriaSeen: 0, criteriaChecked: 0 };
+      pills.append(pill(bandWords[assessment.band] || assessment.band, bandTone[assessment.band] || ''));
+      // The score stays visible but stops being the headline. The 2026-09-29 review found it sitting
+      // in a 17-point band across every real advert, so it cannot answer "which should I read first".
+      if (job.score !== null) pills.append(pill('Score ' + job.score + '/100'));
+
+      var checked = document.createElement('div');
+      checked.className = 'score';
+      var checkedCount = document.createElement('div');
+      checkedCount.textContent = assessment.criteriaSeen === 0
+        ? '--'
+        : assessment.criteriaChecked + '/' + assessment.criteriaSeen;
+      var checkedLabel = document.createElement('div');
+      checkedLabel.className = 'scorelabel';
+      checkedLabel.textContent = assessment.criteriaSeen === 0 ? 'unread' : 'checked';
+      checked.append(checkedCount, checkedLabel);
+      checked.title = 'How many of the advert’s stated requirements the agent could judge against your profile.';
+      top.append(left, checked);
       card.append(top);
+
+      if (assessment.summary) {
+        var says = document.createElement('p');
+        says.className = 'muted';
+        says.textContent = assessment.summary;
+        card.append(says);
+      }
 
       var actions = document.createElement('div');
       actions.className = 'actions';
@@ -656,7 +722,7 @@ export const trackerPageHtml = String.raw`<!doctype html>
       });
       card.append(details);
       container.append(card);
-    });
+    }
   }
 
   function renderCounts(counts) {

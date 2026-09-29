@@ -116,3 +116,29 @@ could rank them. That is a design decision, not a bug.
 2. If scores cannot discriminate, is a score the right interface at all, versus grouping by hard
    gates passed and criteria coverage?
 3. Should the criteria cap be a count at all, or should it be bounded by document section?
+
+## Addendum, later the same day: question 2 answered
+
+Question 2 above — "if scores cannot discriminate, is a score the right interface at all, versus
+grouping by hard gates passed and criteria coverage?" — was decided in favour of grouping. The
+tracker now groups vacancies by how much of the advert could be checked, and the score is shown as a
+secondary detail. No scoring, threshold or weighting was changed, and no band boundary is a tunable
+number: each band is decided by whether a count is zero.
+
+Running that grouping against the real local database produced a finding this note had already
+predicted but not measured in place. Defect 1 above — "the ten real adverts had never been
+re-scored", recorded as still unfixed — is still unfixed _in the data_, even though the code fix
+shipped:
+
+- 10 tracker rows carry decisions from `shadow-1.3.0` and 45 from `shadow-1.5.0`, against a current
+  matcher of `shadow-1.6.0`;
+- 6 jobs hold 65,344 characters of criteria text, and 90 requirement rows exist;
+- 0 rows are flagged for re-match, so nothing will re-score on its own.
+
+The consequence is that seven adverts sat on the shortlist scoring 52 to 54 with not one requirement
+ever checked. The extraction work had been done and was simply never applied to the rows on display.
+The grouping made that visible in one line — "7 requirements read across 55 adverts, 0 checked" —
+where the score had presented it as a confident ranking.
+
+Question 1 (whether to attempt evidencing free-text criteria deterministically) and question 3 (the
+criteria cap) remain open. Neither was touched.

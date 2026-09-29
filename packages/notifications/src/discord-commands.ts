@@ -1,6 +1,6 @@
 import { newCorrelationId } from '@job-agent/observability';
-import type { ReviewStatus, TrackingStores } from '@job-agent/tracking';
-import { reviewStatuses } from '@job-agent/tracking';
+import type { ReviewStatus, ShortlistAssessment, TrackingStores } from '@job-agent/tracking';
+import { groupByShortlistBand, reviewStatuses, shortlistBandLabels } from '@job-agent/tracking';
 
 import type { ApplicationCommandPort } from './application-port.js';
 import type { EmailApplicationCommandPort } from './email-application-port.js';
@@ -34,6 +34,12 @@ export type InteractionOutcome = {
 
 function money(minor: number | null): string {
   return minor === null ? 'not stated' : `£${Math.round(minor / 100).toLocaleString('en-GB')}`;
+}
+
+/** How much of the advert the agent could judge, in a few words. */
+function checkedPhrase(assessment: ShortlistAssessment): string {
+  if (assessment.criteriaSeen === 0) return 'no requirements read';
+  return `${String(assessment.criteriaChecked)}/${String(assessment.criteriaSeen)} requirements checked`;
 }
 
 function isReviewStatus(value: string): value is ReviewStatus {
@@ -350,10 +356,17 @@ export class DiscordCommandService {
       sort: 'score_desc',
     });
     if (page.jobs.length === 0) return `No ${statuses[0] ?? 'shortlisted'} jobs right now.`;
-    const lines = page.jobs.map(
-      (job) =>
-        `• ${job.title} — ${job.employer} (${job.location}) — score ${job.score === null ? 'n/a' : String(job.score)} — id ${job.jobId.slice(0, 8)}`,
-    );
+    // Grouped by what the agent could establish, not ranked by score. The 2026-09-29 review found
+    // every real advert scoring inside a 17-point band, so a list in score order implied an
+    // ordering that was not there.
+    const groups = groupByShortlistBand(page.jobs, (job) => job.assessment.band);
+    const lines = groups.flatMap((group) => [
+      `**${group.label}** (${String(group.entries.length)})`,
+      ...group.entries.map(
+        (job) =>
+          `• ${job.title} — ${job.employer} (${job.location}) — ${checkedPhrase(job.assessment)} — id ${job.jobId.slice(0, 8)}`,
+      ),
+    ]);
     return [`${String(page.total)} ${statuses[0] ?? 'shortlisted'} job(s):`, ...lines].join('\n');
   }
 
@@ -382,13 +395,17 @@ export class DiscordCommandService {
         `${job.title} — ${job.employer}`,
         `Location: ${job.location}`,
         `Salary: ${money(job.salaryMinMinor)} to ${money(job.salaryMaxMinor)} (${job.salaryGate ?? 'unknown'})`,
-        `Score: ${job.score === null ? 'not scored' : String(job.score)}/100`,
+        `${shortlistBandLabels[job.assessment.band]}: ${job.assessment.summary}`,
         `Status: ${job.reviewStatus} (${job.lifecycleStatus})`,
         unknowns > 0
-          ? `${String(unknowns)} essential requirement(s) need your confirmation.`
-          : 'All essential requirements matched verified evidence.',
+          ? `${String(unknowns)} requirement(s) the agent could not judge are listed on the tracker page.`
+          : '',
+        // Kept, and kept last: it does not separate adverts well enough to lead with.
+        `Score: ${job.score === null ? 'not scored' : String(job.score)}/100`,
         job.canonicalUrl,
-      ].join('\n');
+      ]
+        .filter((line) => line !== '')
+        .join('\n');
     }
 
     if (subCommand === 'apply') {

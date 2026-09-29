@@ -208,6 +208,28 @@ answered for you. Reusable and demographic answers are shown only for the topics
 request, and never reach the copy-all. A job that is closed, restricted to internal candidates, or
 already recorded as submitted produces no answers at all.
 
+## What the tracker leads with
+
+Not a score. `/tracker` groups vacancies by how much of the advert the agent could actually check
+against your profile:
+
+| Group                        | What it means                                                              |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| Checked against your profile | Every requirement the advert states was judged either way.                 |
+| Partly checked               | Some judged, some not.                                                     |
+| Yours to judge               | Requirements were read and none could be judged. The agent has no opinion. |
+| Requirements never read      | Nothing was established at all. Open the advert.                           |
+| Blocked                      | A hard gate failed, such as a vacancy open only to existing staff.         |
+
+The score is still recorded and still shown, but as a secondary pill. It stopped being the headline
+because it did not separate anything: measured across ten real adverts it sat inside a 17-point band,
+and every rejection was a hard gate rather than a score. None of the group boundaries is a tunable
+number — each is decided by whether a count is zero — so there is nothing here to tune.
+
+`pnpm shortlist:report` prints the same grouping for your own tracked jobs. If it says almost nothing
+has been checked, re-score first: a tracker row shows the decision of whichever matcher last scored
+it, and that can predate the criteria-reading work. Choose **Score anything new** on `/tracker`.
+
 ## Applying by email
 
 For vacancies whose advert **explicitly instructs candidates to apply by email**, approving in

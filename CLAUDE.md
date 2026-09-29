@@ -89,7 +89,7 @@ The architecture specification is authoritative. If implementation and specifica
   browser worker drives. No candidate-account access, no real
   employer form, and no submission capability outside that fake target.
 
-`pnpm check` passes 735 tests across 61 files (the Playwright tests skip themselves on a machine
+`pnpm check` passes 749 tests across 62 files (the Playwright tests skip themselves on a machine
 where `pnpm browser:install` has not been run). It runs `lint`, `format:check`, `typecheck` and
 `test`; `format:check` was added on 2026-09-29 because unformatted code could otherwise be committed
 and then surface as a large unrelated diff the next time anyone ran `pnpm format`. Prettier ignores
@@ -174,10 +174,11 @@ Every rejection is a hard gate — four adverts are `restricted_to_internal_cand
 advert is rejected on score. So the shortlist is not discarding anything, but neither is it ranking,
 and signing it off would certify a ranking that does not exist.
 
-The decision this leaves is a design one, not a defect: either evidencing free-text criteria against
-the profile is worth attempting, or a score is the wrong interface and the tracker should group by
-hard gates passed and criteria coverage instead. `docs/criteria-extraction-review-2026-09-29.md`
-records the measurements and states the question in full.
+**That design question was decided on 2026-09-29: a score is the wrong interface.** The tracker now
+groups by what the agent could actually check, and the score is secondary. See "The shortlist stopped
+leading with a score" below, including the stale-match-run finding that must be cleared before this
+gate can be judged at all. `docs/criteria-extraction-review-2026-09-29.md` records the original
+measurements.
 
 1. Shortlist-quality review — the synthetic corpus (`pnpm shadow:corpus`) and about ten real
    MyJobScotland adverts added through `/tracker`. Judge the **Criteria seen** column too, and decide
@@ -230,6 +231,64 @@ their local `.env`.
 
 Do not begin Phase 3 — a single real, supervised employer adapter — without a new explicit
 instruction from the user, and not before both sign-off blocks above are filled in.
+
+### The shortlist stopped leading with a score (added 2026-09-29)
+
+The user's decision, taken on 2026-09-29, on the design question the criteria review left open:
+**a score is the wrong interface, and the tracker now groups by what the agent could actually check.**
+No scoring, threshold or weighting was touched; the score is still recorded and still shown as a
+secondary pill.
+
+`packages/tracking/src/shortlist.ts` derives a `ShortlistAssessment` from a recorded match run and
+nothing else. Five bands, and the load-bearing property is that **none of them depends on a tunable
+number** — every one is decided by whether a count is zero:
+
+| Band              | Rule                                                     |
+| ----------------- | -------------------------------------------------------- |
+| `blocked`         | A hard reject reason exists.                             |
+| `criteria_unseen` | No applicable requirement was established at all.        |
+| `yours_to_judge`  | Requirements were read; none could be judged either way. |
+| `fully_checked`   | Requirements were read; none was left `unknown`.         |
+| `partly_checked`  | Some judged, some `unknown`.                             |
+
+That is deliberate. This project's standing instruction is that thresholds and weightings are decided
+through versioned configuration rather than tuned in passing, and a presentation band chosen by taste
+would be the same thing in disguise. `shortlist.test.ts` pins it: 1 unknown among 99 checked and 1
+checked among 99 unknowns both land in `partly_checked`, because nothing here is a proportion.
+`not_applicable` counts as neither seen nor checked, so a requirement the agent ruled out is not
+reported as a gap.
+
+`coverage` is reported for information and never decides a band. `groupByShortlistBand` preserves the
+caller's ordering inside each group, so it adds a reading order and invents no comparison.
+
+**Where it surfaces.** The assessment is on `TrackedJobSummary`, derived in `mapSummary` from an
+`explanation_json` now joined through `summaryFrom`, so one query yields the row and what was
+established about it. `/tracker` groups its list under band headings and the circular badge shows
+`checked/seen` instead of a score out of 100. Discord's `/jobs list` groups the same way and `/job
+show` leads with the band; both keep the score, last.
+
+**What this immediately exposed, and it is a data problem rather than a code one.** Run against the
+real local database, every advert landed in `criteria_unseen` or `yours_to_judge`: 7 requirements read
+across 55 adverts, 0 checked. The cause is the defect the 2026-09-29 criteria review named and did not
+resolve in this database. Measured directly:
+
+- 10 tracker rows still carry decisions from `shadow-1.3.0` and 45 from `shadow-1.5.0`, while
+  `MATCHER_VERSION` is `shadow-1.6.0`;
+- yet 6 jobs hold 65,344 characters of criteria text and `job_requirements` holds 90 rows;
+- and 0 rows are flagged `needs_rematch`.
+
+So the criteria were read and the requirements were extracted; the tracker was displaying decisions
+taken before any of that existed. Seven adverts sat on the shortlist scoring 52 to 54 with no
+requirement ever checked, which is precisely the false confidence the score was providing.
+
+`5b190a3` already made `listAwaitingMatch` select on a matcher-version mismatch, so **re-scoring now
+reaches these rows**: start the API and choose "Score anything new" on `/tracker`, then confirm with
+`pnpm shortlist:report`. **Nothing was re-scored from this session** — that writes new match runs and
+can move a system-decided review status on 55 real rows, which is the user's call, not a side effect of
+a presentation change.
+
+**The gate is still not signed.** It cannot be judged until that re-score has run, and section 2z of
+`docs/runbooks/phase-1b-discovery.md` now says so before anything else in that section.
 
 ### Discord approve means application sent (added 2026-09-29)
 

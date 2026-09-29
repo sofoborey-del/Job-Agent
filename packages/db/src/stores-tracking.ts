@@ -1,6 +1,7 @@
 import type { NormalisedJob } from '@job-agent/discovery';
 import type { MatchRunStore, TrackingStore } from '@job-agent/tracking';
 import {
+  assessShortlistEntry,
   assertReviewTransition,
   type Actor,
   type JobAwaitingMatch,
@@ -91,10 +92,21 @@ const summaryColumns = `t.id AS tracking_id, t.user_id, t.job_id, t.lifecycle_st
   t.needs_rematch, t.first_seen_at, t.last_seen_at, t.status_changed_at, t.version,
   j.title, j.canonical_url, j.location_json, j.source_key, j.salary_min_minor, j.salary_max_minor,
   j.salary_basis, j.posted_at, j.closes_at, j.version AS job_version, j.description_completeness,
-  c.canonical_name AS employer`;
+  c.canonical_name AS employer,
+  m.explanation_json`;
+
+/**
+ * The tables every tracker read needs. The match run is joined rather than fetched separately so
+ * that one query yields both the row and what the agent could establish about it.
+ */
+const summaryFrom = `job_tracking t
+         JOIN jobs j ON j.id = t.job_id
+         JOIN companies c ON c.id = j.company_id
+         LEFT JOIN match_runs m ON m.id = t.last_match_run_id`;
 
 function mapSummary(row: SqlRow): TrackedJobSummary {
   const location = asRecord(row.location_json);
+  const completeness = asText(row.description_completeness) === 'snippet' ? 'snippet' : 'full';
   return {
     jobId: asText(row.job_id),
     title: asText(row.title),
@@ -116,9 +128,16 @@ function mapSummary(row: SqlRow): TrackedJobSummary {
     firstSeenAt: iso(row.first_seen_at, new Date().toISOString()),
     lastSeenAt: iso(row.last_seen_at, new Date().toISOString()),
     jobVersion: asNumber(row.job_version, 1),
-    descriptionCompleteness:
-      asText(row.description_completeness) === 'snippet' ? 'snippet' : 'full',
+    descriptionCompleteness: completeness,
     duplicateOfJobId: asNullableText(row.duplicate_of_job_id),
+    assessment: assessShortlistEntry({
+      explanation:
+        row.explanation_json === null || row.explanation_json === undefined
+          ? null
+          : (asRecord(row.explanation_json) as unknown as MatchExplanation),
+      descriptionCompleteness: completeness,
+      lifecycleStatus: asText(row.lifecycle_status),
+    }),
   };
 }
 
@@ -273,16 +292,12 @@ export class SqlTrackingStore implements TrackingStore {
     const offset = Math.max(filter.offset ?? 0, 0);
 
     const totalResult = await this.db.query(
-      `SELECT COUNT(*)::int AS total FROM job_tracking t
-         JOIN jobs j ON j.id = t.job_id
-         JOIN companies c ON c.id = j.company_id
+      `SELECT COUNT(*)::int AS total FROM ${summaryFrom}
         WHERE ${where}`,
       params,
     );
     const rows = await this.db.query(
-      `SELECT ${summaryColumns} FROM job_tracking t
-         JOIN jobs j ON j.id = t.job_id
-         JOIN companies c ON c.id = j.company_id
+      `SELECT ${summaryColumns} FROM ${summaryFrom}
         WHERE ${where}
         ORDER BY ${order}
         LIMIT ${String(limit)} OFFSET ${String(offset)}`,
@@ -296,9 +311,7 @@ export class SqlTrackingStore implements TrackingStore {
 
   async detail(userId: string, jobId: string): Promise<TrackedJobDetail | null> {
     const result = await this.db.query(
-      `SELECT ${summaryColumns} FROM job_tracking t
-         JOIN jobs j ON j.id = t.job_id
-         JOIN companies c ON c.id = j.company_id
+      `SELECT ${summaryColumns} FROM ${summaryFrom}
         WHERE t.user_id = $1 AND t.job_id = $2`,
       [userId, jobId],
     );

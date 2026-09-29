@@ -1,6 +1,7 @@
 import type { MatchAction, RequirementOutcome } from '@job-agent/domain';
 import type { NormalisedJob, SourceAdapterType } from '@job-agent/discovery';
 
+import type { ShortlistAssessment } from './shortlist.js';
 import type { LifecycleStatus, ReviewStatus } from './state.js';
 
 export type Actor = 'user' | 'system' | 'worker';
@@ -238,6 +239,13 @@ export type TrackedJobSummary = {
   descriptionCompleteness: 'full' | 'snippet';
   /** Set when this row has been superseded by, or is a duplicate of, another tracked job. */
   duplicateOfJobId: string | null;
+  /**
+   * What the agent could actually establish, derived from the recorded match run.
+   *
+   * This is the headline the tracker leads with instead of the score. See `shortlist.ts` for why:
+   * the score does not separate adverts, so presenting it as a ranking overstates what is known.
+   */
+  assessment: ShortlistAssessment;
 };
 
 export type TrackedJobPage = {
