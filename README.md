@@ -208,6 +208,26 @@ answered for you. Reusable and demographic answers are shown only for the topics
 request, and never reach the copy-all. A job that is closed, restricted to internal candidates, or
 already recorded as submitted produces no answers at all.
 
+## Applying by email
+
+For vacancies whose advert **explicitly instructs candidates to apply by email**, approving in
+Discord really does send the application. Nothing else in this project does that.
+
+See [`docs/runbooks/email-applications.md`](docs/runbooks/email-applications.md) for what to
+configure and how to use it. In short: `/apply prepare id:<job>` reads the advert's own instruction,
+builds a message from verified profile facts only, and posts it to your private channel in full —
+recipient, reply address, subject, attachment name and hash, the advert's instruction quoted word for
+word, and the entire body as it would be sent. `/apply approve id:<job> manifest:<reference>` sends
+it, once.
+
+The approval is bound to a hash of everything that could change what the employer receives: a word of
+the body, the recipient, the attached CV, the advert version behind it. Change any of them and the
+earlier approval no longer matches and the send is refused as stale. A send the provider does not
+confirm is never retried — it waits for you to check your sent mail and say what happened.
+
+It is off until an email provider is configured, refused entirely in the hosted discovery-only
+deployment, and cannot be used for a vacancy that asks for an online application.
+
 ## Safety defaults
 
 - Minimum annual base salary: GBP 25,000.
@@ -220,6 +240,11 @@ already recorded as submitted produces no answers at all.
 - No route can open, fill or submit a real employer form. The per-job answer pack reads the profile
   through the same gates a real prefill would have to pass and prints what they allow, for you to
   copy; it contacts no employer and records no submission.
+- The one outward-facing action is sending an email application, and only for a vacancy whose advert
+  instructs it. The recipient comes from the advert's own published instruction and nowhere else, the
+  message is built solely from verified facts and contains no claim about you, approval is single-use
+  and bound to a hash of everything that could change what is received, and a send the provider does
+  not confirm pauses for you rather than being retried.
 - A demographic or reusable answer is returned only for a topic named on that one request, is never
   included in a copy-all, and is never auto-filled anywhere.
 - At most one fake submission can occur per application, and approval is invalidated by any

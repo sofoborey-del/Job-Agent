@@ -14,6 +14,16 @@ export type OutboxPublisherOptions = {
   logger?: StructuredLogger;
   quietHours?: QuietHours | null;
   batchSize?: number;
+  /**
+   * Loads the text of an email-application review at the moment it is delivered.
+   *
+   * The review is the one message that has to contain applicant wording, because approving a
+   * message you cannot read is not approval. Keeping it out of the outbox row means the durable,
+   * queryable, loggable object holds a reference and a part number, and the wording is fetched from
+   * local encrypted storage only to be handed straight to the chat service. Returning null — a
+   * superseded or unreadable review — falls back to a card that says so and shows nothing.
+   */
+  reviewText?: (reference: { reviewRef: string; chunkIndex: number }) => Promise<string | null>;
 };
 
 export type PublishSummary = {
@@ -66,7 +76,8 @@ export class OutboxPublisher {
     const events = await this.options.stores.outbox.claimBatch(now, this.options.batchSize ?? 10);
     for (const event of events) {
       summary.attempted += 1;
-      const result = await channel.sendMessage(renderCardText(buildCard(event)));
+      const content = await this.renderEvent(event);
+      const result = await channel.sendMessage(content);
       if (result.status === 'delivered') {
         await this.options.stores.outbox.markPublished(event.id, now);
         summary.delivered += 1;
@@ -94,5 +105,21 @@ export class OutboxPublisher {
       });
     }
     return summary;
+  }
+
+  /** The card text for one event, hydrating an email review from local storage as it goes out. */
+  private async renderEvent(event: {
+    eventType: string;
+    payload: Record<string, unknown>;
+  }): Promise<string> {
+    if (event.eventType === 'EMAIL_APPLICATION_REVIEW' && this.options.reviewText !== undefined) {
+      const reviewRef = event.payload.reviewRef;
+      const chunkIndex = event.payload.chunkIndex;
+      if (typeof reviewRef === 'string' && typeof chunkIndex === 'number') {
+        const text = await this.options.reviewText({ reviewRef, chunkIndex });
+        if (text !== null) return text;
+      }
+    }
+    return renderCardText(buildCard(event));
   }
 }

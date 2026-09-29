@@ -36,6 +36,15 @@ const allowedPayloadKeys = new Set([
   'newLeads',
   'criteriaRead',
   'examples',
+  // Email applications. The recipient's *domain* is here and its full address deliberately is not:
+  // the address belongs in the review the person reads, not in every later notification and log.
+  'recipientDomain',
+  'providerReference',
+  'detail',
+  'emailApplicationId',
+  'manifestRef',
+  'chunkIndex',
+  'chunkCount',
 ]);
 
 export function safePayload(payload: Record<string, unknown>): Record<string, unknown> {
@@ -123,6 +132,65 @@ function leadsDiscoveredCard(payload: Record<string, unknown>): NotificationCard
   return { title: 'New job leads', lines, url: null, severity: 'info' };
 }
 
+/**
+ * The one notification that may claim an application was made. It says so only after a provider
+ * acknowledged the message and gave a reference for it.
+ */
+function emailApplicationSentCard(payload: Record<string, unknown>): NotificationCard {
+  return {
+    title: `Application sent: ${text(payload.title, 'a role')} at ${text(payload.employer, 'an employer')}`,
+    lines: [
+      `Emailed to an address at ${text(payload.recipientDomain, 'the employer')}.`,
+      `Provider reference: ${text(payload.providerReference, 'none given')}`,
+      'Your tracker now records this vacancy as applied for, so nothing further will be sent for it.',
+    ],
+    url: null,
+    severity: 'info',
+  };
+}
+
+function emailApplicationUncertainCard(payload: Record<string, unknown>): NotificationCard {
+  return {
+    title: `Unconfirmed send: ${text(payload.title, 'a role')} at ${text(payload.employer, 'an employer')}`,
+    lines: [
+      `The provider did not confirm a message to ${text(payload.recipientDomain, 'the employer')}.`,
+      'It may or may not have gone. Nothing will be retried automatically, because sending twice is worse than not sending.',
+      'Check your sent mail, then record what you found with /apply reconcile.',
+    ],
+    url: null,
+    severity: 'warning',
+  };
+}
+
+function emailApplicationFailedCard(payload: Record<string, unknown>): NotificationCard {
+  return {
+    title: `Nothing was sent: ${text(payload.title, 'a role')} at ${text(payload.employer, 'an employer')}`,
+    lines: [
+      `Reason code: ${text(payload.errorCode, 'unknown')}`,
+      'The provider refused the message, so no application was made. Prepare it again when the cause is fixed.',
+    ],
+    url: null,
+    severity: 'error',
+  };
+}
+
+/**
+ * Fallback for a review whose text could not be loaded at delivery time. The review itself is never
+ * stored in the outbox — the row holds a reference, and the publisher fetches the text as it sends —
+ * so this card is what a superseded or unreadable review looks like.
+ */
+function emailApplicationReviewCard(): NotificationCard {
+  return {
+    title: 'A message is waiting for your approval',
+    lines: [
+      'Its text could not be loaded, so it is not shown here and nothing has been sent.',
+      'Run /apply status to see where that application stands.',
+    ],
+    url: null,
+    severity: 'warning',
+  };
+}
+
 function agentPausedCard(payload: Record<string, unknown>): NotificationCard {
   return {
     title: 'Job agent paused',
@@ -166,6 +234,14 @@ export function buildCard(
       return discoveryFailedCard(payload);
     case 'AGENT_PAUSED':
       return agentPausedCard(payload);
+    case 'EMAIL_APPLICATION_SENT':
+      return emailApplicationSentCard(payload);
+    case 'EMAIL_APPLICATION_UNCERTAIN':
+      return emailApplicationUncertainCard(payload);
+    case 'EMAIL_APPLICATION_FAILED':
+      return emailApplicationFailedCard(payload);
+    case 'EMAIL_APPLICATION_REVIEW':
+      return emailApplicationReviewCard();
     case 'AGENT_RESUMED':
       return agentResumedCard();
     default:

@@ -13,6 +13,7 @@
     "@job-agent/discovery": "workspace:*",
     "@job-agent/document-safety": "workspace:*",
     "@job-agent/domain": "workspace:*",
+    "@job-agent/email-application": "workspace:*",
     "@job-agent/knowledge-base": "workspace:*",
     "@job-agent/matching": "workspace:*",
     "@job-agent/notifications": "workspace:*",

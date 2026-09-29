@@ -14,6 +14,7 @@
     { "path": "../../packages/discovery" },
     { "path": "../../packages/document-safety" },
     { "path": "../../packages/domain" },
+    { "path": "../../packages/email-application" },
     { "path": "../../packages/knowledge-base" },
     { "path": "../../packages/matching" },
     { "path": "../../packages/notifications" },

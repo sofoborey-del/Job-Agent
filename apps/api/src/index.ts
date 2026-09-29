@@ -8,12 +8,15 @@ import {
   PGliteProfileRepository,
   PostgresDatabase,
   PostgresProfileRepository,
+  SqlEmailApplicationRepository,
   SqlSitePolicyStore,
 } from '@job-agent/db';
 import { fakeAtsAdapter } from '@job-agent/adapters';
 import { ApplicationWorkflowService } from '@job-agent/application';
+import { defaultAgentConfig } from '@job-agent/config';
 import { defaultSourceDefinitions } from '@job-agent/discovery';
-import { DiscordClient, DiscordCommandService } from '@job-agent/notifications';
+import { EmailApplicationService, GmailEmailTransport } from '@job-agent/email-application';
+import { DiscordClient, DiscordCommandService, DiscordGateway } from '@job-agent/notifications';
 import { RedactingLogger } from '@job-agent/observability';
 import { ApplicationRunner, DiscoveryScheduler, OutboxPublisher } from '@job-agent/orchestrator';
 import {
@@ -34,6 +37,13 @@ import {
 import { FieldCipher, StaticEncryptionKeyProvider } from '@job-agent/security';
 
 import { createApplicationCommandPort, type ApplicationRuntime } from './application-routes.js';
+import {
+  createEmailApplicationCommandPort,
+  LocalProfileSource,
+  OutboxEmailNotifier,
+  TrackerJobSource,
+  type EmailApplicationRuntime,
+} from './email-application-routes.js';
 import { buildServer } from './server.js';
 import { SpawnWorkerTransport } from './worker-transport.js';
 
@@ -129,6 +139,9 @@ const notificationsConfigured = discordBotToken !== '' && discordChannelId !== '
 
 const quietHoursStart = Number(process.env.QUIET_HOURS_START ?? '22');
 const quietHoursEnd = Number(process.env.QUIET_HOURS_END ?? '7');
+// Assigned below, once the stores it needs exist. The publisher is built first because the
+// scheduler takes it, so the review hydrator closes over this rather than over the runtime itself.
+let emailApplications: EmailApplicationRuntime | null = null;
 const publisher = new OutboxPublisher({
   stores,
   channel: notificationsConfigured
@@ -143,11 +156,30 @@ const publisher = new OutboxPublisher({
           timeZone: process.env.APP_TIMEZONE ?? 'Europe/London',
         }
       : null,
+  // The review's wording is fetched from local encrypted storage as the message goes out, so the
+  // outbox row itself never holds it.
+  reviewText: async ({ reviewRef, chunkIndex }) => {
+    const separator = reviewRef.lastIndexOf(':');
+    const applicationId = reviewRef.slice(0, separator);
+    const manifestHash = reviewRef.slice(separator + 1);
+    if (emailApplications === null || separator < 1) return null;
+    const chunks = await emailApplications.service.reviewChunks(applicationId, manifestHash);
+    return chunks?.[chunkIndex] ?? null;
+  },
 });
 
 const agentUserId = process.env.AGENT_USER_ID ?? '';
 const discordConfigured =
   !discoveryOnly && discordPublicKey !== '' && discordAllowedUserId !== '' && agentUserId !== '';
+const gatewayEnabled = (process.env.DISCORD_GATEWAY_ENABLED ?? 'false') === 'true';
+if (
+  gatewayEnabled &&
+  (!notificationsConfigured || discordAllowedUserId === '' || agentUserId === '')
+) {
+  throw new Error(
+    'Discord Gateway requires a bot token, channel ID, allowed user ID and agent user ID',
+  );
+}
 const schedulerEnabled = (process.env.DISCOVERY_SCHEDULER_ENABLED ?? 'false') === 'true';
 if (discoveryOnly && !schedulerEnabled) {
   throw new Error('discovery_only mode requires DISCOVERY_SCHEDULER_ENABLED=true');
@@ -234,6 +266,83 @@ const applications: ApplicationRuntime = {
   },
 };
 
+// Applying by email. Off unless it is switched on and a provider is configured, and never in the
+// hosted discovery-only deployment, which has no approval surface and must not be able to send.
+const emailApplicationsEnabled =
+  !discoveryOnly && (process.env.EMAIL_APPLICATIONS_ENABLED ?? 'false') === 'true';
+if (emailApplicationsEnabled) {
+  const provider = process.env.EMAIL_PROVIDER ?? '';
+  if (provider !== 'gmail') {
+    throw new Error('EMAIL_APPLICATIONS_ENABLED=true requires EMAIL_PROVIDER=gmail');
+  }
+  if (agentUserId === '') {
+    throw new Error('Applying by email requires AGENT_USER_ID');
+  }
+  const transport = new GmailEmailTransport({
+    clientId: process.env.GMAIL_CLIENT_ID ?? '',
+    clientSecret: process.env.GMAIL_CLIENT_SECRET ?? '',
+    refreshToken: process.env.GMAIL_REFRESH_TOKEN ?? '',
+    logger,
+  });
+  if (!transport.ready) {
+    throw new Error(
+      'Applying by email requires GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN',
+    );
+  }
+  emailApplications = {
+    userId: agentUserId,
+    providerName: transport.provider,
+    service: new EmailApplicationService({
+      repository: new SqlEmailApplicationRepository(sqlDatabase),
+      jobs: new TrackerJobSource(stores, applicationStores.applications),
+      profile: new LocalProfileSource(profileService, cvProcessingService),
+      transport,
+      notifier: new OutboxEmailNotifier(stores),
+      audit: {
+        append: (entry) =>
+          stores.audit.append(
+            {
+              userId: entry.userId,
+              actorType: 'user',
+              actorId: null,
+              action: entry.action,
+              resourceType: 'job',
+              resourceId: entry.jobId,
+              result: entry.result,
+              policyVersion: 'email-application-v1',
+              correlationId: entry.correlationId,
+              metadata: entry.metadata,
+            },
+            new Date(),
+          ),
+      },
+      cipher,
+      config: defaultAgentConfig,
+      policyVersion: 'email-application-v1',
+      timezone: process.env.APP_TIMEZONE ?? 'Europe/London',
+      logger,
+    }),
+  };
+}
+
+const discordCommands =
+  discordAllowedUserId !== '' && agentUserId !== ''
+    ? new DiscordCommandService({
+        stores,
+        userId: agentUserId,
+        allowedDiscordUserId: discordAllowedUserId,
+        allowedChannelId: discordChannelId,
+        ...(!discoveryOnly
+          ? { applications: createApplicationCommandPort(applications, agentUserId) }
+          : {}),
+        ...(emailApplications === null
+          ? {}
+          : {
+              emailApplications: createEmailApplicationCommandPort(emailApplications, stores),
+            }),
+      })
+    : null;
+
 const app = buildServer({
   profileService,
   documentService,
@@ -241,6 +350,7 @@ const app = buildServer({
   adminToken: requiredEnvironment('PROFILE_ADMIN_TOKEN'),
   logger: true,
   ...(discoveryOnly ? {} : { applications }),
+  ...(emailApplications === null ? {} : { emailApplications }),
   tracking: {
     stores,
     adzunaCredentials: {
@@ -255,22 +365,21 @@ const app = buildServer({
     manualSourceKey: 'myjobscotland_manual',
     schedulerEnabled,
     ...(scheduler === null ? {} : { scheduler }),
-    ...(discordConfigured
+    ...(discordConfigured && discordCommands !== null
       ? {
           discord: {
             publicKey: discordPublicKey,
-            commands: new DiscordCommandService({
-              stores,
-              userId: agentUserId,
-              allowedDiscordUserId: discordAllowedUserId,
-              allowedChannelId: discordChannelId === '' ? null : discordChannelId,
-              applications: createApplicationCommandPort(applications, agentUserId),
-            }),
+            commands: discordCommands,
           },
         }
       : {}),
   },
 });
+
+const discordGateway =
+  gatewayEnabled && discordCommands !== null
+    ? new DiscordGateway({ botToken: discordBotToken, commands: discordCommands, logger })
+    : null;
 
 if (scheduler !== null) {
   // One readiness check before the loop starts, so the reason is visible immediately. The loop
@@ -286,6 +395,7 @@ if (scheduler !== null) {
 }
 
 const shutdown = async (): Promise<void> => {
+  discordGateway?.stop();
   scheduler?.stop();
   await app.close();
   await closeDatabase();
@@ -294,3 +404,4 @@ process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());
 
 await app.listen({ host, port });
+discordGateway?.start();

@@ -17,6 +17,7 @@
     { "path": "./packages/notifications" },
     { "path": "./packages/orchestrator" },
     { "path": "./packages/application" },
+    { "path": "./packages/email-application" },
     { "path": "./packages/db" },
     { "path": "./apps/fake-ats" },
     { "path": "./apps/browser-worker" },

@@ -7,11 +7,13 @@
   },
   "references": [
     { "path": "../profile" },
+    { "path": "../config" },
     { "path": "../domain" },
     { "path": "../security" },
     { "path": "../tracking" },
     { "path": "../discovery" },
     { "path": "../document-safety" },
+    { "path": "../email-application" },
     { "path": "../policy" },
     { "path": "../application" },
     { "path": "../browser-core" },

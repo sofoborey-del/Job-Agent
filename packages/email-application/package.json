@@ -1,0 +1,17 @@
+{
+  "name": "@job-agent/email-application",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "types": "./dist/index.d.ts",
+    "default": "./dist/index.js"
+  },
+  "dependencies": {
+    "@job-agent/browser-core": "workspace:*",
+    "@job-agent/config": "workspace:*",
+    "@job-agent/domain": "workspace:*",
+    "@job-agent/observability": "workspace:*",
+    "@job-agent/security": "workspace:*"
+  }
+}

@@ -73,6 +73,59 @@ export const commandDefinitions = [
     ],
   },
   {
+    // The only command group that can cause anything to leave this machine. `approve` requires the
+    // review reference shown with the message, so it cannot be issued without having read it.
+    name: 'apply',
+    description: 'Apply by email, where the advert asks candidates to do that',
+    options: [
+      sub('check', 'Read the advert’s application instruction and prepare a message', [idOption]),
+      sub('prepare', 'Build the message and post it here for you to read', [
+        idOption,
+        {
+          type: 3,
+          name: 'override_salary',
+          description: 'Apply even though the salary is below or under your minimum',
+          required: false,
+          choices: [
+            { name: 'yes', value: 'true' },
+            { name: 'no', value: 'false' },
+          ],
+        },
+      ]),
+      sub('approve', 'Send the message you have read. This really does send it', [
+        idOption,
+        {
+          type: 3,
+          name: 'manifest',
+          description: 'The review reference shown with the message',
+          required: true,
+        },
+      ]),
+      sub('reject', 'Discard the message. Nothing is sent', [idOption, reasonOption]),
+      sub('status', 'Where one email application stands', [idOption]),
+      sub('reconcile', 'Record what you found after a send the provider did not confirm', [
+        idOption,
+        {
+          type: 3,
+          name: 'outcome',
+          description: 'What your sent mail shows',
+          required: true,
+          choices: [
+            { name: 'it was sent', value: 'sent' },
+            { name: 'it was not sent', value: 'not_sent' },
+          ],
+        },
+        {
+          type: 3,
+          name: 'reference',
+          description: 'The message reference from your sent mail',
+          required: false,
+        },
+      ]),
+      sub('list', 'Email applications prepared or sent'),
+    ],
+  },
+  {
     name: 'application',
     description: 'Practice applications on the local fake ATS only',
     options: [

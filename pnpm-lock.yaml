@@ -76,6 +76,9 @@ importers:
       '@job-agent/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@job-agent/email-application':
+        specifier: workspace:*
+        version: link:../../packages/email-application
       '@job-agent/knowledge-base':
         specifier: workspace:*
         version: link:../../packages/knowledge-base
@@ -235,6 +238,9 @@ importers:
       '@job-agent/domain':
         specifier: workspace:*
         version: link:../domain
+      '@job-agent/email-application':
+        specifier: workspace:*
+        version: link:../email-application
       '@job-agent/policy':
         specifier: workspace:*
         version: link:../policy
@@ -254,6 +260,9 @@ importers:
         specifier: ^13.0.0
         version: 13.0.2
     devDependencies:
+      '@job-agent/config':
+        specifier: workspace:*
+        version: link:../config
       '@types/pg':
         specifier: ^8.15.5
         version: 8.23.1
@@ -286,6 +295,24 @@ importers:
         version: 6.3.289
 
   packages/domain: {}
+
+  packages/email-application:
+    dependencies:
+      '@job-agent/browser-core':
+        specifier: workspace:*
+        version: link:../browser-core
+      '@job-agent/config':
+        specifier: workspace:*
+        version: link:../config
+      '@job-agent/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@job-agent/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@job-agent/security':
+        specifier: workspace:*
+        version: link:../security
 
   packages/knowledge-base:
     dependencies:

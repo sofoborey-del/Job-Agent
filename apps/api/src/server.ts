@@ -25,6 +25,10 @@ import { onboardingPageHtml } from './onboarding-page.js';
 import { profileHistoryPageHtml } from './profile-history-page.js';
 import { shadowMatchPageHtml } from './shadow-match-page.js';
 import { registerApplicationRoutes, type ApplicationRuntime } from './application-routes.js';
+import {
+  registerEmailApplicationRoutes,
+  type EmailApplicationRuntime,
+} from './email-application-routes.js';
 import { trackerPageHtml } from './tracker-page.js';
 import {
   answerTopicFactKey,
@@ -126,6 +130,8 @@ export type BuildServerOptions = {
   myJobScotlandFetcher?: (url: string) => Promise<DiscoveredJob>;
   tracking?: TrackingRuntime;
   applications?: ApplicationRuntime;
+  /** Present only when an authorised email provider is configured. */
+  emailApplications?: EmailApplicationRuntime;
   adminToken: string;
   logger?: boolean;
 };
@@ -789,6 +795,12 @@ export function buildServer(options: BuildServerOptions): FastifyInstance {
 
   if (options.applications !== undefined) {
     registerApplicationRoutes(app, options.applications);
+  }
+
+  // Absent unless an email provider is configured, so a deployment that cannot send has no route
+  // that pretends it can.
+  if (options.emailApplications !== undefined) {
+    registerEmailApplicationRoutes(app, options.emailApplications);
   }
 
   app.setErrorHandler(async (error: Error, _request, reply) => {

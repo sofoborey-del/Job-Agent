@@ -159,7 +159,11 @@ export class SqlOutboxStore implements OutboxStore {
       RETURNING ${outboxColumns}`,
       [now, limit],
     );
-    return result.rows.map(mapOutbox);
+    // UPDATE ... RETURNING has no ordering of its own, and some events are only meaningful in
+    // order: a review split across several messages reads as nonsense if part two arrives first.
+    return result.rows
+      .map(mapOutbox)
+      .sort((left, right) => left.availableAt.localeCompare(right.availableAt));
   }
 
   async markPublished(id: string, now: Date): Promise<void> {

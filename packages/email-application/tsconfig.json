@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../browser-core" },
+    { "path": "../config" },
+    { "path": "../domain" },
+    { "path": "../observability" },
+    { "path": "../security" }
+  ],
+  "include": ["src/**/*.ts"]
+}

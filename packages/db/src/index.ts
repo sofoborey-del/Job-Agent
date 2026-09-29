@@ -16,6 +16,7 @@ export * from './stores-platform.js';
 export * from './stores-tracking.js';
 export * from './site-policies.js';
 export * from './stores-application.js';
+export * from './stores-email-application.js';
 export * from './testing.js';
 
 type FactRow = {

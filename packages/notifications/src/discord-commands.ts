@@ -3,6 +3,7 @@ import type { ReviewStatus, TrackingStores } from '@job-agent/tracking';
 import { reviewStatuses } from '@job-agent/tracking';
 
 import type { ApplicationCommandPort } from './application-port.js';
+import type { EmailApplicationCommandPort } from './email-application-port.js';
 import {
   ephemeralReply,
   interactionPayloadHash,
@@ -19,6 +20,11 @@ export type DiscordCommandOptions = {
   allowedChannelId?: string | null;
   /** Present only once Phase 2 is wired in. Without it the application commands say so. */
   applications?: ApplicationCommandPort;
+  /**
+   * Present only when applying by email is configured. Without it `/apply` says so and can do
+   * nothing, which is what a deployment with no email provider should look like.
+   */
+  emailApplications?: EmailApplicationCommandPort;
 };
 
 export type InteractionOutcome = {
@@ -98,7 +104,97 @@ export class DiscordCommandService {
     if (commandName === 'application') {
       return this.applicationCommand(subCommand, options, interaction.id);
     }
-    return 'Unknown command. Try /jobs list, /job show, /application show, /agent status.';
+    if (commandName === 'apply') return this.applyCommand(subCommand, options, interaction.id);
+    return 'Unknown command. Try /jobs list, /job show, /apply check, /agent status.';
+  }
+
+  /**
+   * Applying to an employer by email, for vacancies whose advert asks for that.
+   *
+   * `approve` is the only command anywhere in this surface that causes something to leave the
+   * machine. It requires the review reference the person was shown, so approving without having
+   * read the message is not possible, and the interaction id makes a replayed approval harmless.
+   */
+  private async applyCommand(
+    subCommand: string | null,
+    options: Record<string, string>,
+    interactionId: string,
+  ): Promise<string> {
+    const port = this.options.emailApplications;
+    if (port === undefined) {
+      return 'Applying by email is not configured in this build, so there is nothing to send.';
+    }
+
+    if (subCommand === 'list') {
+      const applications = await port.list(10);
+      if (applications.length === 0) return 'No email applications have been prepared.';
+      return [
+        'Email applications:',
+        ...applications.map(
+          (application) =>
+            `• ${application.jobTitle} — ${application.employer} — ${application.state.replace(/_/g, ' ')}${
+              application.providerReference === null
+                ? ''
+                : ` — reference ${application.providerReference}`
+            } — id ${application.jobId.slice(0, 8)}`,
+        ),
+      ].join('\n');
+    }
+
+    const jobIdPrefix = options.id ?? '';
+    if (jobIdPrefix.length < 6) {
+      return 'Give me the job id shown in /jobs list, for example /apply check id:1a2b3c4d.';
+    }
+
+    if (subCommand === 'check') return (await port.check(jobIdPrefix)).message;
+    if (subCommand === 'status') return (await port.status(jobIdPrefix)).message;
+
+    if (subCommand === 'prepare') {
+      const result = await port.prepare({
+        jobIdPrefix,
+        overrideSalaryFloor: (options.override_salary ?? 'false').toLowerCase() === 'true',
+        requestId: interactionId,
+      });
+      return result.message;
+    }
+
+    if (subCommand === 'approve') {
+      const manifest = options.manifest ?? '';
+      if (manifest.length < 8) {
+        return 'Include the review reference shown with the message, for example manifest:9f2c1ab4d0e1. Approving without it is refused.';
+      }
+      const result = await port.approve({
+        jobIdPrefix,
+        manifestHashPrefix: manifest,
+        requestId: interactionId,
+      });
+      return result.message;
+    }
+
+    if (subCommand === 'reject') {
+      const result = await port.reject({
+        jobIdPrefix,
+        reason: options.reason ?? null,
+        requestId: interactionId,
+      });
+      return result.message;
+    }
+
+    if (subCommand === 'reconcile') {
+      const outcome = (options.outcome ?? '').toLowerCase();
+      if (outcome !== 'sent' && outcome !== 'not_sent') {
+        return 'Say what you found: outcome:sent or outcome:not_sent.';
+      }
+      const result = await port.reconcile({
+        jobIdPrefix,
+        outcome,
+        providerReference: options.reference ?? null,
+        requestId: interactionId,
+      });
+      return result.message;
+    }
+
+    return 'Try /apply check, prepare, approve, reject, status, reconcile or list.';
   }
 
   private async applicationCommand(
@@ -312,8 +408,10 @@ export class DiscordCommandService {
     if (target === null)
       return 'Try /job show, /job shortlist, /job reject, /job reviewed or /job archive.';
 
+    const before = job.reviewStatus;
+    let after: ReviewStatus;
     try {
-      await this.options.stores.tracking.changeReviewStatus({
+      const record = await this.options.stores.tracking.changeReviewStatus({
         userId: this.options.userId,
         jobId: job.jobId,
         to: target,
@@ -323,9 +421,15 @@ export class DiscordCommandService {
         correlationId: newCorrelationId(),
         now,
       });
+      after = record.reviewStatus;
     } catch (error) {
       return error instanceof Error ? error.message : 'That change was not allowed.';
     }
-    return `Marked "${job.title}" as ${target}. This only updates your tracker; nothing was sent to the employer.`;
+    // Reports what actually changed. Saying "marked as shortlisted" for a job that was already
+    // shortlisted reads as a change that did not happen, which is how a no-op looks like a bug.
+    if (after === before) {
+      return `"${job.title}" was already ${before}, so its status has not changed. Nothing was sent to the employer.`;
+    }
+    return `Moved "${job.title}" from ${before} to ${after}. This only updates your tracker; nothing was sent to the employer.`;
   }
 }
