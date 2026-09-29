@@ -69,6 +69,9 @@ Measured with the repository's own `pnpm criteria:report` against the same ten r
 | Criteria evidenced against the profile | 0 | 5 |
 | Worst case | 1 criterion on a 9,916-character specification | 8 |
 
+Those figures cover all ten adverts. The deployed re-score covers the nine that are eligible for
+re-matching, giving 81 criteria of which 4 are evidenced; the difference is the expired advert.
+
 Test suite: 600 passing across 51 files.
 
 ## What is still open, and why it was not "fixed"
@@ -84,10 +87,15 @@ Both of these change scores, and this project's own standing instruction is that
 and weightings are to be decided deliberately through versioned configuration rather than tuned in
 passing. Neither was touched.
 
-**Hard gates are working correctly** and should not be mistaken for inconsistency. Two adverts were
-rejected at scores of 54 and 55 while lower-scoring adverts were shortlisted. Both carry
-`restricted_to_internal_candidates`: they are open only to existing employees, and no score can
-override that. One further advert was rejected because its closing date had passed.
+**Every rejection is a hard gate, not a score.** After the change, four of the ten adverts are
+rejected, and all four carry `restricted_to_internal_candidates`: they are open only to an
+employer's existing staff, and no amount of evidence can satisfy that. Not one advert is rejected on
+score. This bounds the risk of the narrow scoring band: the shortlist currently fails to rank, but it
+is not discarding anything a person would want to see. It also explains an apparent inconsistency -
+an advert rejected at 54 while another is shortlisted at 53 - which is the gate, not the score.
+
+One advert has expired. Expired adverts are excluded from re-matching by lifecycle, so it still
+carries its 26 September decision and its criteria were never re-read.
 
 ## The recommendation
 
