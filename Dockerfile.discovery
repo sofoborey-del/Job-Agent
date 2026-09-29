@@ -12,6 +12,9 @@ COPY --from=build /app/apps ./apps
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/package.json ./package.json
+# The tracker-access bridge runs from here. Shipping it in the image rather than bind-mounting it
+# keeps it part of the reviewed artefact, and avoids relabelling a host file for SELinux.
+COPY --from=build /app/scripts ./scripts
 # The build context carries whatever directory modes the host filesystem had, and the image
 # runs as an unprivileged user. Make every copied path traversable and readable by it, so a
 # restrictive umask on the machine that prepared the context cannot stop the app from starting.

@@ -1,6 +1,13 @@
-# Outbound-only deployment. There are deliberately no published ports.
+# Outbound-only deployment. Nothing is published to a routable address: the one published port is
+# bound to the host's own loopback, for an SSH forward, and the API itself still listens on the
+# container's loopback only.
 services:
   agent:
+    ports:
+      # Host loopback only. Not 0.0.0.0, so this is unreachable from the network however the host
+      # firewall is configured, and Docker's own iptables rules cannot widen it. It reaches the
+      # tracker-access bridge below, never the API directly.
+      - '127.0.0.1:3310:3310'
     build:
       context: .
       dockerfile: Dockerfile.discovery
@@ -44,6 +51,37 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  # Relays the published loopback port to the API's loopback listener, inside the agent's own
+  # network namespace. It exists because the API must not bind to a routable address and a
+  # published Docker port cannot reach a loopback listener. It carries no credentials, adds no
+  # authority, and is the only way the local screens can be opened over an SSH forward.
+  #
+  # Stopping it closes that door without touching discovery:
+  #   docker compose -f compose.discovery.yml stop tracker-access
+  tracker-access:
+    image: job-agent-agent:latest
+    depends_on:
+      - agent
+    network_mode: 'service:agent'
+    entrypoint: ['node', '/app/scripts/tracker-access-forwarder.mjs']
+    environment:
+      FORWARD_LISTEN_PORT: '3310'
+      FORWARD_TARGET_PORT: '3210'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 2m
+        max-file: '2'
 
 volumes:
   agent-data:
