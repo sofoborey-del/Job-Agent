@@ -1,0 +1,10 @@
+# Claude Code configuration, including the permission rules. It belongs to the user, not to this
+# codebase, so formatting never rewrites it: a trailing newline added here is a diff on a security
+# setting nobody asked for.
+.claude/
+
+# Build output and local state. Never formatted, and skipping them keeps pnpm format fast.
+dist/
+**/dist/
+local-data/
+coverage/
