@@ -1,0 +1,27 @@
+# Line endings are LF in the repository and LF in the working tree, on every platform.
+#
+# Without this, Git on Windows honours the global core.autocrlf=true and writes CRLF into the working
+# tree on clone and on every branch switch. Prettier's endOfLine default is "lf", so `pnpm check`
+# then fails format:check on every text file in the repository — 138 of them — for carriage returns
+# alone, with no content difference at all. A fresh clone could not pass its own check.
+#
+# It also matters beyond formatting: the hosted deployment copies files to an aarch64 Linux host, and
+# a CRLF shebang fails there with `bash\r: No such file or directory`.
+#
+# This changes checkout behaviour only. The repository already stores LF, because autocrlf normalised
+# on the way in, so adding this produces no content change.
+* text=auto eol=lf
+
+# Binary files Git must never touch. None are tracked today; these are here so that adding one later
+# does not corrupt it.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.zip binary
+*.gz binary
+*.woff binary
+*.woff2 binary
