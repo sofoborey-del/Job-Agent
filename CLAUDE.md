@@ -1035,6 +1035,12 @@ The local service uses `.env`, which is intentionally ignored. Ask the user to e
 Indexed 2026-09-30, because three of these were reachable only by listing the directory and one of
 them described work nobody had recorded anywhere else.
 
+**Start here**
+
+| Document                   | What it is                                                                                                                                          |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/AGENT_ONBOARDING.md` | The short version of this file, for starting an AI assistant on the project — including one that cannot reach the repository and must be pasted to. |
+
 **The specification**
 
 | Document                                                  | What it is                                                                                                              |
