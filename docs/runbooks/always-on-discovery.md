@@ -1,9 +1,17 @@
 # Always-on discovery and Discord: deployment gate
 
-This is a **prepared deployment**, not a live cloud service. No server has been chosen, no data
-has been transferred, and the Windows sign-in task remains the active instance. The hosted mode is
-only for scheduled, reviewed job discovery, matching, and outbound Discord delivery. It does not
-offer a public tracker, Discord slash commands, real employer form interaction, or submission.
+> **Superseded in part, 2026-09-30.** This was written before the deployment happened, as the gate to
+> pass before choosing a host. The deployment is now **live**: an Oracle Cloud VM has been running
+> `discovery_only` since 2026-09-29, the data is there, and the Windows scheduled task is
+> **disabled** so that there is exactly one writer. Read "The hosted discovery deployment" in
+> `../../CLAUDE.md` for what is actually running, and treat the sections below as the pre-flight
+> checklist that was used rather than as a description of the present state. Do not re-enable the
+> Windows task while the VM runs: two schedulers means two Adzuna callers and duplicate Discord
+> messages against separate databases.
+
+The hosted mode is only for scheduled, reviewed job discovery, matching, and outbound Discord
+delivery. It does not offer a public tracker, Discord slash commands, real employer form
+interaction, or submission.
 
 ## Before go-live
 

@@ -290,4 +290,4 @@ deployment, and cannot be used for a vacancy that asks for an online application
   user, replay-safe, and cannot start an application.
 - External content is untrusted data and cannot alter policy.
 
-See the sibling deliverable [`JOB_APPLICATION_AGENT_ARCHITECTURE.md`](../JOB_APPLICATION_AGENT_ARCHITECTURE.md) for the complete approved specification.
+See [`docs/architecture/JOB_APPLICATION_AGENT_ARCHITECTURE.md`](docs/architecture/JOB_APPLICATION_AGENT_ARCHITECTURE.md) for the complete approved specification. It is held in the repository so a clone carries it, byte-identical to the reviewed original.

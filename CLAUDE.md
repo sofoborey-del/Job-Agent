@@ -5,10 +5,53 @@ This repository is a standalone personal job-application agent. It is completely
 ## Read first
 
 1. Read `README.md` for the implemented system and local commands.
-2. Read `../JOB_APPLICATION_AGENT_ARCHITECTURE.md` before proposing or implementing a new phase.
-3. Inspect the existing package boundaries and tests before changing behaviour.
+2. Read `docs/architecture/JOB_APPLICATION_AGENT_ARCHITECTURE.md` before proposing or implementing a
+   new phase.
+3. Read "What state this project is actually in" immediately below, which is the shortest true
+   summary of what works, what is switched off, and what is waiting on the user.
+4. Inspect the existing package boundaries and tests before changing behaviour.
+5. See "Every document in this repository" near the end for what each runbook and note covers.
 
 The architecture specification is authoritative. If implementation and specification differ, stop and clearly identify the mismatch instead of silently weakening a safety control.
+
+The specification lives in the repository as of 2026-09-30, so a clone carries the document the rules
+here defer to. It is a byte-identical copy of the reviewed original, which was written to
+`../JOB_APPLICATION_AGENT_ARCHITECTURE.md` outside this repository; `docs/architecture/` is
+Prettier-ignored to keep it that way, and the in-repo copy is now the canonical one. If the sibling
+copy is ever edited, bring the change in here and say so in the commit rather than keeping two
+authorities.
+
+## What state this project is actually in
+
+Written 2026-09-30 for whoever picks this up next. Nothing here replaces the detail below; it exists
+because the detail is long and the summary is what prevents a wrong first assumption.
+
+**It has never applied for a job.** No email application has been sent, and no real employer form has
+ever been opened, filled or submitted by this code.
+
+**What it does for the user today:** finds leads unattended (Adzuna, hosted on the Oracle VM), tells
+them on Discord that leads arrived, reads a full MyJobScotland advert and its criteria document when
+one is pasted into `/tracker`, and produces a per-job pack of grounded answers at
+`/application-prep` for the person to copy into the employer's own form by hand.
+
+**What is switched off, and is not a forgotten flag.** Real-site submission does not exist as a
+concept: `realSiteExecutionModes` is `['disabled', 'prefill_only']` and every real-site adapter
+carries `allowsSubmit: z.literal(false)`. Real-site prefill is off because no site permits the
+automation — `robots.txt` disallows the MyJobScotland login paths and the terms grant nothing,
+re-reviewed 2026-09-28. Auto-submit is off everywhere. The Gmail scope is `gmail.send` only, so this
+project cannot read anyone's mail. Do not "fix" any of these.
+
+**The capability gap that matters most.** The shortlist does not rank. 86 of 100 extracted criteria
+resolve to `unknown`, because prose such as "significant experience within Organisational
+Development" cannot be evidenced against a structured profile by deterministic code, and this
+project's standing rule is that a model may propose but never authorise. That tension is the gap. It
+is a design question for the user, not a bug to fix, and it is why the Phase 1B gate is unsigned.
+
+**Both open gates need the user, not more code.** See "Recommended next milestone".
+
+**Two things a fresh session must not do:** do not read or print `.env` (it holds the profile
+encryption key, the admin token, the Discord identifiers, the Adzuna key and the Gmail refresh
+token), and do not put `local-data/` anywhere — it is the encrypted profile and CV.
 
 ## Current implementation
 
@@ -971,9 +1014,12 @@ the agent refuses to start with it switched on and a credential missing. It is r
 Preparing one real application by hand is `docs/runbooks/application-preparation.md`: `/tracker` →
 Prepare application → Open the full answer pack, which opens `/application-prep`.
 
-The Phase 2 walkthrough through the screens needs a throwaway database, because nothing in
-`apps/api` starts or advances a practice application. See section 4a of
-`docs/runbooks/phase-2-fake-ats.md`:
+The Phase 2 walkthrough through the screens runs against a throwaway database, so that a practice
+run never writes to the real tracker. It is not that the API cannot drive one: `ApplicationRunner`
+was wired into `apps/api` on 2026-09-26, and `POST /v1/applications/:userId/start` and
+`.../advance` exist — see "Driving a practice application from the screens" above. An earlier
+version of this paragraph said no route could start or advance a run, which was true before that
+change and is not true now. See section 4a of `docs/runbooks/phase-2-fake-ats.md`:
 
 ```text
 WALKTHROUGH_DATA_DIR=./local-data/phase2-screens/pglite   node --env-file=.env scripts/phase-2-screen-walkthrough.mjs seed
@@ -983,3 +1029,43 @@ It refuses to run against the real `./local-data/pglite`, and refuses a non-loop
 origin.
 
 The local service uses `.env`, which is intentionally ignored. Ask the user to enter secrets locally; never request that they paste a token, CV, password, or decrypted profile data into a chat.
+
+## Every document in this repository
+
+Indexed 2026-09-30, because three of these were reachable only by listing the directory and one of
+them described work nobody had recorded anywhere else.
+
+**The specification**
+
+| Document                                                  | What it is                                                                                                              |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `docs/architecture/JOB_APPLICATION_AGENT_ARCHITECTURE.md` | The approved architecture and threat model. Authoritative, and the canonical copy. Read before proposing any new phase. |
+
+**Runbooks — things the user performs**
+
+| Runbook                                    | Covers                                                                                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/runbooks/phase-1b-discovery.md`      | The Phase 1B gate: discovery, tracker, Discord. Holds the unsigned sign-off block. Start at section 2z — the re-score must run first. |
+| `docs/runbooks/phase-2-fake-ats.md`        | The Phase 2 gate: one practice application on the bundled fake ATS, and its sign-off block.                                           |
+| `docs/runbooks/application-preparation.md` | Preparing one real application by hand via `/application-prep`. The thing that is actually useful day to day.                         |
+| `docs/runbooks/email-applications.md`      | Applying by email where an advert instructs it. The only path where approving something sends a real application.                     |
+| `docs/runbooks/always-on-discovery.md`     | The pre-flight checklist used before the Oracle VM deployment. **Partly superseded** — it has a banner saying so.                     |
+
+**Reviews and records — things already decided or measured**
+
+| Document                                        | Covers                                                                                                             |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `docs/real-application-pilot.md`                | The site-policy permission review for real-site prefill, redone 2026-09-28. This is why live prefill stays off.    |
+| `docs/criteria-extraction-review-2026-09-29.md` | The original measurements behind the criteria-extraction defects. Self-contained; readable without the repository. |
+| `docs/phase-2-walkthrough-record.md`            | A transcript of one complete practice application, so the Phase 2 gate can be read as well as performed.           |
+| `docs/permission-request-draft.md`              | A drafted permission request to COSLA for MyJobScotland. **Not sent** — the user sends it themselves.              |
+
+**Open questions — neither decided nor built**
+
+| Document                            | The question it holds open                                                                                                                                                            |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/reed-api-permission-draft.md` | Whether to add Reed as a third discovery source, and a drafted message to Reed asking. **No Reed code exists and none should be written until that question has an answer.**          |
+| `docs/discord-callback-options.md`  | How to let Discord reach the agent so commands can be answered from a phone. This is what blocks runbook sections 8 and 9 of the Phase 1B gate, which need an inbound HTTPS endpoint. |
+
+Both of the above need a user decision, and neither has one. Do not begin either on your own
+initiative.

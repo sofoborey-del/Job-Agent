@@ -8,3 +8,8 @@ dist/
 **/dist/
 local-data/
 coverage/
+
+# The approved architecture specification, held here byte-identical to the document that was
+# reviewed. It is a received artifact rather than this codebase's prose, and the whole point of the
+# in-repo copy is that it is the same document; reformatting it would make "authoritative" ambiguous.
+docs/architecture/
